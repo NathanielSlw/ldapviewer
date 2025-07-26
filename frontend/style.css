@@ -1,0 +1,312 @@
+body {
+    font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+    background-color: #f5f7fa;
+    padding: 30px;
+    line-height: 1.6;
+}
+h1 {
+    color: #2c3e50;
+    font-size: 28px;
+    margin-bottom: 10px;
+}
+.controls {
+    margin-bottom: 20px;
+}
+.main-menu {
+    display: flex;
+    gap: 12px;
+    background: #2980b9;
+    padding: 12px 18px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(41,128,185,0.08);
+    margin-bottom: 10px;
+    align-items: center;
+}
+.main-menu button {
+    background: #fff;
+    color: #2980b9;
+    font-weight: 600;
+    border: none;
+    border-radius: 5px;
+    box-shadow: 0 1px 2px rgba(41,128,185,0.07);
+    transition: background 0.2s, color 0.2s;
+}
+.main-menu button:hover, .main-menu button:focus {
+    background: #eaf6fb;
+    color: #1a5a7a;
+}
+.sub-menu {
+    margin: 10px 0 10px 0;
+    padding: 8px 0;
+    display: flex;
+    gap: 10px;
+    background: #f4f8fb;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(41,128,185,0.04);
+}
+.sub-menu button {
+    background: #eaf6fb;
+    color: #2980b9;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.2s, color 0.2s;
+}
+.sub-menu button:hover, .sub-menu button:focus {
+    background: #d0eaf7;
+    color: #1a5a7a;
+}
+input[type="text"] {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+}
+button {
+    padding: 8px 16px;
+    font-size: 14px;
+    margin-top: 5px;
+    margin-bottom: 15px;
+    cursor: pointer;
+    background-color: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    margin-right: 8px;
+}
+.entry {
+    background: #ffffff;
+    margin-bottom: 15px;
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    font-size: 15px;
+}
+.entry h2 {
+    margin: 0;
+    font-size: 18px;
+    color: #34495e;
+    cursor: pointer;
+    user-select: none;
+}
+.attributes {
+    display: none;
+    margin-top: 10px;
+    padding-left: 20px;
+}
+.attribute {
+    margin-bottom: 6px;
+}
+.key {
+    font-weight: bold;
+    color: #2980b9;
+}
+.value {
+    color: #2c3e50;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    font-size: 14px;
+}
+th, td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+    vertical-align: top;
+}
+th {
+    background-color: #2980b9;
+    color: white;
+    position: sticky;
+    top: 0;
+}
+tr:nth-child(even) {
+    background-color: #f2f2f2;
+}
+.hidden {
+    display: none;
+}
+.attr-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin-top: 10px;
+}
+.attr-table td {
+    padding: 4px 8px;
+    vertical-align: top;
+    line-height: 1.4;
+    border-bottom: 1px solid #eee;
+}
+.attr-table td.key {
+    font-weight: 600;
+    color: #2980b9;
+    width: 30%;
+    white-space: nowrap;
+}
+.attr-table td.value {
+    color: #2c3e50;
+    word-break: break-word;
+}
+
+/* Filter Sections */
+.filter-sections {
+    margin-bottom: 20px;
+}
+
+.filter-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #2980b9;
+    color: white;
+    padding: 12px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 2px;
+    user-select: none;
+    transition: background-color 0.2s;
+}
+
+.filter-section-header:hover {
+    background: #1a5a7a;
+}
+
+.filter-section-title {
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.collapse-indicator {
+    font-size: 12px;
+    font-weight: bold;
+    transition: transform 0.2s;
+}
+
+.collapse-indicator.collapsed {
+    transform: rotate(-90deg);
+}
+
+
+/* Filter Panels */
+.filter-panel {
+    display: none;
+    padding: 20px;
+    border: 1px solid #e1e8ed;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    margin-bottom: 15px;
+}
+
+.filter-panel h4 {
+    margin-top: 0;
+    margin-bottom: 20px;
+    color: #2c3e50;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.filter-section {
+    margin-bottom: 20px;
+}
+
+.filter-section h5 {
+    margin-bottom: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.filter-section h5.security-critical {
+    color: #e74c3c;
+}
+
+.filter-section h5.password-related {
+    color: #f39c12;
+}
+
+.filter-section h5.auth-access {
+    color: #3498db;
+}
+
+.filter-section h5.account-types {
+    color: #9b59b6;
+}
+
+.filter-section h5.info-disclosure {
+    color: #f39c12;
+}
+
+.filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 10px;
+}
+
+.filter-checkbox-label {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    background: #ffffff;
+    border: 1.5px solid #e8ecef;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 15px;
+}
+
+.filter-checkbox-label:hover {
+    border-color: #3498db;
+    background: #f8fbff;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.12);
+}
+
+.filter-checkbox-label input[type="checkbox"] {
+    margin-right: 12px;
+    transform: scale(1.3);
+    accent-color: #3498db;
+}
+
+.filter-controls {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 2px solid #ecf0f1;
+}
+
+.clear-filters-btn {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(231, 76, 60, 0.2);
+}
+
+.clear-filters-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
+}
+
+.filter-status {
+    margin-left: 15px;
+    font-weight: 500;
+    color: #7f8c8d;
+    font-size: 15px;
+}

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <title>LDAP Viewer - {filename}</title>
+    <style>
+        {style_content}
+    </style>
+    <script>
+        {script_content}
+    </script>
+</head>
+<body>
+    <h1>LDAP Viewer - {filename}</h1>
+    <div class="controls">
+        <div class="main-menu">
+            <button onclick="switchView('detail')">Detail View</button>
+            <button onclick="switchView('table')">Table View</button>
+            <button onclick="exportCSV()">Export to CSV</button>
+        </div>
+        <div class="sub-menu" id="detailButtons">
+            <button id="expandBtn" onclick="toggleAll(true)">Expand all</button>
+            <button id="collapseBtn" onclick="toggleAll(false)">Collapse all</button>
+            <!-- <button onclick="toggleUACFilterPanel()">Show UAC Filters</button>
+            <button onclick="toggleLDAPAttributePanel()">Show LDAP Attribute Filters</button> -->
+        </div>
+        <input type="text" id="searchInput" onkeyup="filterEntries()" placeholder="🔍 Search LDAP object : username, email, etc." autofocus>
+
+        <!-- Filter Sections -->
+        <div class="filter-sections">
+            <div class="filter-section-header" onclick="toggleFilterSection('uacFilterPanel')">
+                <span class="filter-section-title">🛡️ UAC Filters</span>
+                <span class="collapse-indicator" id="uacIndicator">▼</span>
+            </div>
+            <div id="uacFilterPanel" class="filter-panel">
+                <h4>Filter by UserAccountControl Flags:</h4>
+                
+                <!-- Security Critical Flags -->
+                <div class="filter-section">
+                    <h5 class="security-critical">🚨 Security Critical</h5>
+                    <div class="filter-grid">
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="2" data-name="DISABLED" onchange="applyUACFilter()"> 🚫 Account Disabled
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="4194304" data-name="DONT_REQUIRE_PREAUTH" onchange="applyUACFilter()"> 🔑 No Kerberos PreAuth (ASREPRoast)
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="524288" data-name="TRUSTED_FOR_DELEGATION" onchange="applyUACFilter()"> 🎯 Unconstrained Delegation
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="16777216" data-name="TRUSTED_TO_AUTH_FOR_DELEGATION" onchange="applyUACFilter()"> 🔐 Constrained Delegation (S4U2Self)
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="1048576" data-name="NOT_DELEGATED" onchange="applyUACFilter()"> 🛡️ Cannot Be Delegated
+                        </label>
+                    </div>
+                </div>
+                <!-- Password Related Flags -->
+                <div class="filter-section">
+                    <h5 class="password-related">🔐 Password Related</h5>
+                    <div class="filter-grid">
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="32" data-name="PASSWORD_NOT_REQUIRED" onchange="applyUACFilter()"> 🔓 Password Not Required
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="65536" data-name="DONT_EXPIRE_PASSWORD" onchange="applyUACFilter()"> ⏰ Password Never Expires
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="64" data-name="PASSWD_CANT_CHANGE" onchange="applyUACFilter()"> 🔒 User Cannot Change Password
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="8388608" data-name="PASSWORD_EXPIRED" onchange="applyUACFilter()"> ⚠️ Password Expired
+                        </label>
+                    </div>
+                </div>
+                <!-- Authentication & Access -->
+                <div class="filter-section">
+                    <h5 class="auth-access">🔑 Authentication & Access</h5>
+                    <div class="filter-grid">
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="262144" data-name="SMARTCARD_REQUIRED" onchange="applyUACFilter()"> 💳 Smartcard Required
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="16" data-name="LOCKOUT" onchange="applyUACFilter()"> 🔐 Account Locked Out
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="128" data-name="ENCRYPTED_TEXT_PWD_ALLOWED" onchange="applyUACFilter()"> 🔐 Store Password Using Reversible Encryption
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" value="2097152" data-name="USE_DES_KEY_ONLY" onchange="applyUACFilter()"> 🔓 Use DES Key Only
+                        </label>
+                    </div>
+                </div>
+                <div class="filter-controls">
+                    <button onclick="clearUACFilters()" class="clear-filters-btn">Clear All Filters</button>
+                    <span id="uacFilterStatus" class="filter-status">No filters active</span>
+                </div>
+            </div>
+            
+            <div class="filter-section-header" onclick="toggleFilterSection('ldapAttributePanel')">
+                <span class="filter-section-title">🔍 LDAP Attribute Filters</span>
+                <span class="collapse-indicator" id="ldapIndicator">▼</span>
+            </div>
+            <div id="ldapAttributePanel" class="filter-panel">
+                <h4>🔍 Filter by LDAP Attributes</h4>
+                
+                <!-- Security Critical Attributes -->
+                <div class="filter-section">
+                    <h5 class="security-critical">🚨 Security Critical Attributes</h5>
+                    <div class="filter-grid">
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" data-attribute="servicePrincipalName" onchange="applyLDAPAttributeFilter()"> 🎯 Has SPN (Kerberoastable)
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" data-attribute="msDS-AllowedToDelegateTo" onchange="applyLDAPAttributeFilter()"> 🔐 Constrained Delegation Target
+                        </label>
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" data-attribute="adminCount" data-value="1" onchange="applyLDAPAttributeFilter()"> 👑 Protected by AdminSDHolder
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Information Disclosure -->
+                <div class="filter-section">
+                    <h5 class="info-disclosure">📝 Information Disclosure</h5>
+                    <div class="filter-grid">
+                        <label class="filter-checkbox-label">
+                            <input type="checkbox" data-attribute="description" onchange="applyLDAPAttributeFilter()"> 📄 Has Description
+                        </label>
+                    </div>
+                </div>
+                
+                <!-- Controls -->
+                <div class="filter-controls">
+                    <button onclick="clearLDAPAttributeFilters()" class="clear-filters-btn">Clear All Filters</button>
+                    <span id="ldapAttributeFilterStatus" class="filter-status">No filters active</span>
+                </div>
+            </div>
+
+            <label class="filter-checkbox-label">
+                <input type="checkbox" id="nonDefaultCheckbox" onchange="toggleNonDefault()">See non-default objects only
+            </label>
+            <!--<button onclick="toggleNonDefault()">See non-default objects</button>-->
+        </div>
+        
+    </div>
+    </div>
+    <div id="detailView">
+        {detail_content}
+    </div>
+    <div id="tableView" class="hidden">
+        {table_content}
+    </div>
+</body>
+</html>
