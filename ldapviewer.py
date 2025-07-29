@@ -138,10 +138,30 @@ def main(input_file):
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(full_html)
 
-    print(f"[+] Interface HTML interactive générée : {output_file}")
+    print(f"[+] Interactive HTML interface generated: {output_file}")
+
+
+logo_ascii = r"""
+    __    __          _    ___                       
+   / /___/ /___ _____| |  / (_)__ _      _____  _____
+  / / __  / __ `/ __ \ | / / / _ \ | /| / / _ \/ ___/
+ / / /_/ / /_/ / /_/ / |/ / /  __/ |/ |/ /  __/ /    
+/_/\__,_/\__,_/ .___/|___/_/\___/|__/|__/\___/_/     
+             /_/                                     
+"""
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python ldapviewer.py domain_users.json")
         sys.exit(1)
+    input_file = sys.argv[1]
+    if not os.path.isfile(input_file):
+        print(f"[!] Error: Input file '{input_file}' not found.")
+        sys.exit(1)
+    if not input_file.lower().endswith('.json'):
+        print(f"[!] Error: Input file must have a .json extension.")
+        sys.exit(1)
+        
+    print(logo_ascii)
+    print("LDAPViewer v1.0 - by NathanielSlw (github.com/NathanielSlw)\n")
     main(sys.argv[1])
