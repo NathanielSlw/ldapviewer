@@ -13,17 +13,26 @@
 <body>
     <h1>LDAP Viewer - {filename}</h1>
     <div class="controls">
+        <!-- Menu principal avec emojis intégrés -->
         <div class="main-menu">
-            <button onclick="switchView('detail')">Detail View</button>
-            <button onclick="switchView('table')">Table View</button>
-            <button onclick="exportCSV()">Export to CSV</button>
+            <button onclick="switchView('detail')">
+                📋 Detail View
+            </button>
+            <button onclick="switchView('table')">
+                📊 Table View
+            </button>
+            <button onclick="exportCSV()">
+                💾 Export to CSV
+            </button>
         </div>
+        
+        <!-- Sous-menu pour expand/collapse - repositionné et stylisé -->
         <div class="sub-menu" id="detailButtons">
-            <button id="expandBtn" onclick="toggleAll(true)">Expand all</button>
-            <button id="collapseBtn" onclick="toggleAll(false)">Collapse all</button>
-            <!-- <button onclick="toggleUACFilterPanel()">Show UAC Filters</button>
-            <button onclick="toggleLDAPAttributePanel()">Show LDAP Attribute Filters</button> -->
+            <button id="expandBtn" onclick="toggleAll(true)">Expand All</button>
+            <button id="collapseBtn" onclick="toggleAll(false)">Collapse All</button>
         </div>
+        
+        <!-- Barre de recherche -->
         <input type="text" id="searchInput" onkeyup="filterEntries()" placeholder="🔍 Search LDAP object : username, email, etc." autofocus>
 
         <!-- Filter Sections -->
@@ -56,6 +65,7 @@
                         </label>
                     </div>
                 </div>
+                
                 <!-- Password Related Flags -->
                 <div class="filter-section">
                     <h5 class="password-related">🔐 Password Related</h5>
@@ -74,6 +84,7 @@
                         </label>
                     </div>
                 </div>
+                
                 <!-- Authentication & Access -->
                 <div class="filter-section">
                     <h5 class="auth-access">🔑 Authentication & Access</h5>
@@ -92,6 +103,7 @@
                         </label>
                     </div>
                 </div>
+                
                 <div class="filter-controls">
                     <button onclick="clearUACFilters()" class="clear-filters-btn">Clear All Filters</button>
                     <span id="uacFilterStatus" class="filter-status">No filters active</span>
@@ -116,7 +128,7 @@
                             <input type="checkbox" data-attribute="msDS-AllowedToDelegateTo" onchange="applyLDAPAttributeFilter()"> 🔐 Constrained Delegation Target
                         </label>
                         <label class="filter-checkbox-label">
-                            <input type="checkbox" data-attribute="adminCount" data-value="1" onchange="applyLDAPAttributeFilter()"> 👑 Protected by AdminSDHolder
+                            <input type="checkbox" data-attribute="adminCount" data-value="1" onchange="applyLDAPAttributeFilter()"> 👑 AdminCount = 1 (Was or is AdminSDHolder protected)
                         </label>
                     </div>
                 </div>
@@ -138,14 +150,18 @@
                 </div>
             </div>
 
-            <label class="filter-checkbox-label">
-                <input type="checkbox" id="nonDefaultCheckbox" onchange="toggleNonDefault()">See non-default objects only
+            <!-- Checkbox pour non-default objects -->
+            <label class="filter-checkbox-label" style="margin-top: 10px;">
+                <input type="checkbox" id="nonDefaultCheckbox" onchange="toggleNonDefault()">
+                👁️ See non-default objects only
             </label>
-            <!--<button onclick="toggleNonDefault()">See non-default objects</button>-->
         </div>
-        
+
+        <!-- Compteur de résultats -->
+        <div id="resultsCount">0 results / 0 objects</div>
     </div>
-    </div>
+    
+    <!-- Vues principales -->
     <div id="detailView">
         {detail_content}
     </div>

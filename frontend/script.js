@@ -12,10 +12,10 @@ function toggle(id) {
     const header = elem.previousElementSibling;
     if (elem.style.display === "none" || elem.style.display === "") {
         elem.style.display = "block";
-        header.textContent = header.textContent.replace("▶", "▼");
+        header.classList.add('expanded');
     } else {
         elem.style.display = "none";
-        header.textContent = header.textContent.replace("▼", "▶");
+        header.classList.remove('expanded');
     }
 }
 
@@ -29,80 +29,254 @@ function toggleAll(expand) {
         e.style.display = expand ? "block" : "none";
         const header = e.previousElementSibling;
         if (expand) {
-            if(header.textContent.indexOf("▶") !== -1) {
-                header.textContent = header.textContent.replace("▶", "▼");
-            }
+            header.classList.add('expanded');
         } else {
-            if(header.textContent.indexOf("▼") !== -1) {
-                header.textContent = header.textContent.replace("▼", "▶");
-            }
+            header.classList.remove('expanded');
         }
     }
 }
 
 // ============================================================================
-// SEARCH AND FILTERING
+// UNIFIED FILTERING SYSTEM
 // ============================================================================
+// Centralized filtering that applies all active filters together
 
 let debounceTimer;
+let currentView = 'detail';
+
+// Filter states
+let filterStates = {
+    search: '',
+    nonDefaultOnly: false,
+    uac: {
+        enabled: false,
+        flags: []
+    },
+    ldapAttributes: {
+        enabled: false,
+        attributes: []
+    }
+};
 
 /**
- * Filters entries based on search input
- * Works in both detail and table views
+ * Main filtering function that applies all active filters
+ */
+function applyAllFilters() {
+    if (currentView === 'detail') {
+        applyFiltersToDetailView();
+    } else {
+        applyFiltersToTableView();
+    }
+    updateResultsCount();
+}
+
+/**
+ * Apply all filters to detail view entries
+ */
+function applyFiltersToDetailView() {
+    const entries = document.getElementsByClassName('entry');
+    
+    for (let entry of entries) {
+        let shouldShow = true;
+        
+        // Apply search filter
+        if (filterStates.search && shouldShow) {
+            const text = entry.innerText.toLowerCase();
+            shouldShow = text.includes(filterStates.search);
+        }
+        
+        // Apply non-default filter
+        if (filterStates.nonDefaultOnly && shouldShow) {
+            const objectSIDCell = Array.from(entry.getElementsByClassName('key'))
+                .find(cell => cell.textContent === 'objectSid');
+            let rid = null;
+            if (objectSIDCell) {
+                const valueCell = objectSIDCell.nextElementSibling;
+                rid = getRIDFromObjectSID(valueCell ? valueCell.textContent : "");
+            }
+            shouldShow = (rid !== null && rid >= 1000);
+        }
+        
+        // Apply UAC filter
+        if (filterStates.uac.enabled && shouldShow) {
+            const uacCell = Array.from(entry.getElementsByClassName('key'))
+                .find(cell => cell.textContent === 'userAccountControl');
+            
+            if (uacCell) {
+                const valueCell = uacCell.nextElementSibling;
+                const uacValue = valueCell ? valueCell.textContent : "";
+                shouldShow = hasUACFlags(uacValue, filterStates.uac.flags);
+            } else {
+                shouldShow = false;
+            }
+        }
+        
+        // Apply LDAP attributes filter
+        if (filterStates.ldapAttributes.enabled && shouldShow) {
+            shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => 
+                hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value)
+            );
+        }
+        
+        entry.style.display = shouldShow ? "" : "none";
+    }
+}
+
+/**
+ * Apply all filters to table view rows
+ */
+function applyFiltersToTableView() {
+    const rows = document.querySelectorAll("#tableView tbody tr");
+    const ths = document.querySelectorAll("#tableView thead th");
+    
+    // Find column indices once
+    const objectSIDIndex = Array.from(ths).findIndex(th => th.textContent === "objectSid");
+    const uacIndex = Array.from(ths).findIndex(th => th.textContent === "userAccountControl");
+    
+    rows.forEach(row => {
+        let shouldShow = true;
+        
+        // Apply search filter
+        if (filterStates.search && shouldShow) {
+            const text = row.innerText.toLowerCase();
+            shouldShow = text.includes(filterStates.search);
+        }
+        
+        // Apply non-default filter
+        if (filterStates.nonDefaultOnly && shouldShow) {
+            let rid = null;
+            if (objectSIDIndex !== -1) {
+                const cell = row.cells[objectSIDIndex];
+                rid = getRIDFromObjectSID(cell ? cell.textContent : "");
+            }
+            shouldShow = (rid !== null && rid >= 1000);
+        }
+        
+        // Apply UAC filter
+        if (filterStates.uac.enabled && shouldShow) {
+            if (uacIndex !== -1) {
+                const cell = row.cells[uacIndex];
+                const uacValue = cell ? cell.textContent : "";
+                shouldShow = hasUACFlags(uacValue, filterStates.uac.flags);
+            } else {
+                shouldShow = false;
+            }
+        }
+        
+        // Apply LDAP attributes filter
+        if (filterStates.ldapAttributes.enabled && shouldShow) {
+            shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => {
+                const attrIndex = Array.from(ths).findIndex(th => th.textContent === attrFilter.attribute);
+                
+                if (attrIndex !== -1) {
+                    const cell = row.cells[attrIndex];
+                    const cellValue = cell ? cell.textContent.trim() : "";
+                    
+                    if (attrFilter.value === null) {
+                        return cellValue !== '';
+                    } else {
+                        return cellValue === attrFilter.value;
+                    }
+                }
+                return false;
+            });
+        }
+        
+        row.style.display = shouldShow ? "" : "none";
+    });
+}
+
+/**
+ * Search filter with debouncing
  */
 function filterEntries() {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-        let input = document.getElementById('searchInput').value.toLowerCase();
-        if (currentView === 'detail') {
-            let entries = document.getElementsByClassName('entry');
-            for (let entry of entries) {
-                let text = entry.innerText.toLowerCase();
-                entry.style.display = text.includes(input) ? "" : "none";
-            }
-        } else {
-            let rows = document.querySelectorAll("#tableView tbody tr");
-            rows.forEach(row => {
-                let text = row.innerText.toLowerCase();
-                row.style.display = text.includes(input) ? "" : "none";
-            });
-        }
+        filterStates.search = document.getElementById('searchInput').value.toLowerCase();
+        applyAllFilters();
     }, 150);
 }
 
-// ============================================================================
-// VIEW SWITCHING
-// ============================================================================
-// Toggle between detail view and table view
+/**
+ * Toggle non-default objects filter
+ */
+function toggleNonDefault() {
+    filterStates.nonDefaultOnly = document.getElementById('nonDefaultCheckbox').checked;
+    applyAllFilters();
+}
 
-let currentView = 'detail';
+function updateResultsCount() {
+    let total = 0, visibles = 0;
+    if (currentView === 'detail') {
+        const entries = document.getElementsByClassName('entry');
+        total = entries.length;
+        visibles = Array.from(entries).filter(e => e.style.display !== 'none').length;
+    } else {
+        const rows = document.querySelectorAll("#tableView tbody tr");
+        total = rows.length;
+        visibles = Array.from(rows).filter(r => r.style.display !== 'none').length;
+    }
+    const el = document.getElementById('resultsCount');
+    if (el) el.textContent = `${visibles} result${visibles !== 1 ? 's' : ''} / ${total} object${total !== 1 ? 's' : ''}`;
+}
+
+// ============================================================================
+// VIEW SWITCHING - MENU MANAGEMENT
+// ============================================================================
+
+function setActiveMenuButton(activeButton) {
+    const menuButtons = document.querySelectorAll('.main-menu button');
+    menuButtons.forEach(button => {
+        button.classList.remove('active');
+    });
+    
+    if (activeButton) {
+        activeButton.classList.add('active');
+    }
+}
 
 /**
  * Switches between detail and table views
  * @param {string} view - Either 'detail' or 'table'
  */
 function switchView(view) {
-    currentView = view;
     const detailView = document.getElementById('detailView');
     const tableView = document.getElementById('tableView');
+    const detailButtons = document.getElementById('detailButtons');
+    const activeButton = event ? event.target : null;
+    
+    currentView = view;
+    
     if (view === 'detail') {
         detailView.classList.remove('hidden');
         tableView.classList.add('hidden');
-    } else {
+        detailButtons.style.display = 'flex';
+        setActiveMenuButton(activeButton);
+    } else if (view === 'table') {
         detailView.classList.add('hidden');
         tableView.classList.remove('hidden');
+        detailButtons.style.display = 'none';
+        setActiveMenuButton(activeButton);
     }
-
-    // Reapply current filters after view switch
-    filterEntries();
+    
+    // Re-apply all filters when switching views
+    applyAllFilters();
 }
 
 // ============================================================================
 // CSV EXPORT FUNCTIONALITY
 // ============================================================================
-// Exports the current table view data to CSV format
 
 function exportCSV() {
+    const activeButton = event ? event.target : null;
+    
+    if (activeButton) {
+        activeButton.classList.add('active');
+        setTimeout(() => {
+            activeButton.classList.remove('active');
+        }, 500);
+    }
+
     const table = document.querySelector("#tableView table");
     if (!table) {
         alert("Le tableau n'est pas chargé !");
@@ -134,10 +308,6 @@ function exportCSV() {
 // UI BUTTON STATE MANAGEMENT
 // ============================================================================
 
-/**
- * Updates the visibility of detail view specific buttons
- * Hides expand/collapse buttons when in table view
- */
 function updateDetailButtons() {
     const expandBtn = document.getElementById('expandBtn');
     const collapseBtn = document.getElementById('collapseBtn');
@@ -150,80 +320,31 @@ function updateDetailButtons() {
     }
 }
 
-// Enhance switchView function to update button states
-const _origSwitchView = switchView;
-switchView = function(view) {
-    _origSwitchView(view);
+// Initialize when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    const detailButton = document.querySelector('.main-menu button[onclick*="detail"]');
+    if (detailButton) {
+        detailButton.classList.add('active');
+    }
     updateDetailButtons();
-};
-
-// Initialize button states when page loads
-document.addEventListener('DOMContentLoaded', updateDetailButtons);
+    updateResultsCount(); 
+});
 
 // ============================================================================
-// NON-DEFAULT OBJECTS FILTERING
+// HELPER FUNCTIONS
 // ============================================================================
-// Functionality to show/hide default Windows objects based on RID values
-// Objects with RID >= 1000 are considered non-default (custom objects)
 
 function getRIDFromObjectSID(objectSID) {
-    // objectSID attendu sous forme S-1-5-21-...-RID
     if (!objectSID) return null;
     const parts = objectSID.split('-');
     const rid = parseInt(parts[parts.length - 1], 10);
     return isNaN(rid) ? null : rid;
 }
 
-/**
- * Toggles visibility of default vs non-default objects
- */
-let showNonDefaultOnly = false;
-function toggleNonDefault() {
-    showNonDefaultOnly = document.getElementById('nonDefaultCheckbox').checked;
-    if (currentView === 'detail') {
-        let entries = document.getElementsByClassName('entry');
-        for (let entry of entries) {
-            const objectSIDCell = Array.from(entry.getElementsByClassName('key'))
-                .find(cell => cell.textContent === 'objectSid');
-            let rid = null;
-            if (objectSIDCell) {
-                const valueCell = objectSIDCell.nextElementSibling;
-                rid = getRIDFromObjectSID(valueCell ? valueCell.textContent : "");
-            }
-            if (!showNonDefaultOnly || (rid !== null && rid >= 1000)) {
-                entry.style.display = "";
-            } else {
-                entry.style.display = "none";
-            }
-        }
-    } else {
-        let rows = document.querySelectorAll("#tableView tbody tr");
-        let ths = document.querySelectorAll("#tableView thead th");
-        let objectSIDIndex = Array.from(ths).findIndex(th => th.textContent === "objectSid");
-        rows.forEach(row => {
-            let rid = null;
-            if (objectSIDIndex !== -1) {
-                const cell = row.cells[objectSIDIndex];
-                rid = getRIDFromObjectSID(cell ? cell.textContent : "");
-            }
-            if (!showNonDefaultOnly || (rid !== null && rid >= 1000)) {
-                row.style.display = "";
-            } else {
-                row.style.display = "none";
-            }
-        });
-    }
-}
-
 // ============================================================================
 // USER ACCOUNT CONTROL FILTERING
 // ============================================================================
-// Generic functionality to filter accounts based on userAccountControl flags
-// Allows filtering for various security-relevant account states
 
-/**
- * UserAccountControl flag constants for Active Directory
- */
 const UAC_FLAGS = {
     SCRIPT: 0x0001,
     ACCOUNTDISABLE: 0x0002,
@@ -248,43 +369,25 @@ const UAC_FLAGS = {
     TRUSTED_TO_AUTHENTICATE_FOR_DELEGATION: 0x1000000
 };
 
-/**
- * Current UAC filter state
- */
-let currentUACFilter = {
-    enabled: false,
-    flags: []
-};
-
-/**
- * Checks if userAccountControl has specific flags set
- * @param {string} userAccountControl - The userAccountControl value as string
- * @param {number[]} flags - Array of UAC flag values to check
- * @returns {boolean} True if any of the specified flags are set
- */
 function hasUACFlags(userAccountControl, flags) {
     if (!userAccountControl || flags.length === 0) return false;
     
     const uac = parseInt(userAccountControl, 10);
     if (isNaN(uac)) return false;
     
-    // Check if any of the specified flags are set
     return flags.some(flag => (uac & flag) !== 0);
 }
 
-/**
- * Applies UAC-based filtering to entries
- */
 function applyUACFilter() {
     const checkboxes = document.querySelectorAll('#uacFilterPanel input[type="checkbox"]:checked');
     const selectedFlags = Array.from(checkboxes).map(cb => parseInt(cb.value, 10));
     
-    currentUACFilter.enabled = selectedFlags.length > 0;
-    currentUACFilter.flags = selectedFlags;
+    filterStates.uac.enabled = selectedFlags.length > 0;
+    filterStates.uac.flags = selectedFlags;
     
     // Update status display
     const status = document.getElementById('uacFilterStatus');
-    if (currentUACFilter.enabled) {
+    if (filterStates.uac.enabled) {
         const flagNames = Array.from(checkboxes).map(cb => cb.getAttribute('data-name'));
         status.textContent = `Active: ${flagNames.join(', ')}`;
         status.style.color = '#e74c3c';
@@ -293,92 +396,19 @@ function applyUACFilter() {
         status.style.color = '#7f8c8d';
     }
     
-    // Apply filtering
-    filterByUAC();
+    applyAllFilters();
 }
 
-/**
- * Filters entries based on selected UAC flags
- */
-function filterByUAC() {
-    if (currentView === 'detail') {
-        // Handle detail view filtering
-        let entries = document.getElementsByClassName('entry');
-        
-        for (let entry of entries) {
-            let shouldShow = true;
-            
-            if (currentUACFilter.enabled) {
-                // Find userAccountControl in the attributes table
-                const uacCell = Array.from(entry.getElementsByClassName('key'))
-                    .find(cell => cell.textContent === 'userAccountControl');
-                
-                if (uacCell) {
-                    const valueCell = uacCell.nextElementSibling;
-                    const uacValue = valueCell ? valueCell.textContent : "";
-                    shouldShow = hasUACFlags(uacValue, currentUACFilter.flags);
-                } else {
-                    shouldShow = false; // Hide entries without userAccountControl
-                }
-            }
-            
-            entry.style.display = shouldShow ? "" : "none";
-        }
-    } else {
-        // Handle table view filtering
-        let rows = document.querySelectorAll("#tableView tbody tr");
-        let ths = document.querySelectorAll("#tableView thead th");
-        
-        // Find the userAccountControl column index
-        let uacIndex = Array.from(ths).findIndex(th => th.textContent === "userAccountControl");
-        
-        rows.forEach(row => {
-            let shouldShow = true;
-            
-            if (currentUACFilter.enabled) {
-                if (uacIndex !== -1) {
-                    const cell = row.cells[uacIndex];
-                    const uacValue = cell ? cell.textContent : "";
-                    shouldShow = hasUACFlags(uacValue, currentUACFilter.flags);
-                } else {
-                    shouldShow = false; // Hide entries without userAccountControl
-                }
-            }
-            
-            row.style.display = shouldShow ? "" : "none";
-        });
-    }
-}
-
-/**
- * Clears all UAC filters
- */
 function clearUACFilters() {
-    // Uncheck all checkboxes
     const checkboxes = document.querySelectorAll('#uacFilterPanel input[type="checkbox"]');
     checkboxes.forEach(cb => cb.checked = false);
-    
-    // Apply the cleared filters
     applyUACFilter();
 }
 
 // ============================================================================
 // LDAP ATTRIBUTE FILTERING
 // ============================================================================
-// Filtering based on presence/absence of specific LDAP attributes
 
-let currentLDAPAttributeFilter = {
-    enabled: false,
-    attributes: []
-};
-
-/**
- * Checks if an entry has a specific LDAP attribute with optional value check
- * @param {Element} entry - The DOM entry element
- * @param {string} attributeName - The LDAP attribute name to check
- * @param {string|null} expectedValue - Optional specific value to match
- * @returns {boolean} True if attribute exists (and matches value if specified)
- */
 function hasLDAPAttribute(entry, attributeName, expectedValue = null) {
     const attributeCell = Array.from(entry.getElementsByClassName('key'))
         .find(cell => cell.textContent === attributeName);
@@ -390,18 +420,13 @@ function hasLDAPAttribute(entry, attributeName, expectedValue = null) {
     
     const attributeValue = valueCell.textContent.trim();
     
-    // If no specific value expected, just check if attribute exists and is not empty
     if (expectedValue === null) {
         return attributeValue !== '';
     }
     
-    // Check for specific value
     return attributeValue === expectedValue;
 }
 
-/**
- * Applies LDAP attribute-based filtering to entries
- */
 function applyLDAPAttributeFilter() {
     const checkboxes = document.querySelectorAll('#ldapAttributePanel input[type="checkbox"]:checked');
     const selectedAttributes = Array.from(checkboxes).map(cb => ({
@@ -410,12 +435,12 @@ function applyLDAPAttributeFilter() {
         name: cb.getAttribute('data-attribute')
     }));
     
-    currentLDAPAttributeFilter.enabled = selectedAttributes.length > 0;
-    currentLDAPAttributeFilter.attributes = selectedAttributes;
+    filterStates.ldapAttributes.enabled = selectedAttributes.length > 0;
+    filterStates.ldapAttributes.attributes = selectedAttributes;
     
     // Update status display
     const status = document.getElementById('ldapAttributeFilterStatus');
-    if (currentLDAPAttributeFilter.enabled) {
+    if (filterStates.ldapAttributes.enabled) {
         const attributeNames = selectedAttributes.map(attr => attr.attribute);
         status.textContent = `Active: ${attributeNames.join(', ')}`;
         status.style.color = '#e74c3c';
@@ -424,73 +449,18 @@ function applyLDAPAttributeFilter() {
         status.style.color = '#7f8c8d';
     }
     
-    // Apply filtering
-    filterByLDAPAttributes();
+    applyAllFilters();
 }
 
-/**
- * Filters entries based on selected LDAP attributes
- */
-function filterByLDAPAttributes() {
-    if (currentView === 'detail') {
-        // Handle detail view filtering
-        let entries = document.getElementsByClassName('entry');
-        
-        for (let entry of entries) {
-            let shouldShow = true;
-            
-            if (currentLDAPAttributeFilter.enabled) {
-                // Entry must match ALL selected attribute filters (AND logic)
-                shouldShow = currentLDAPAttributeFilter.attributes.every(attrFilter => 
-                    hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value)
-                );
-            }
-            
-            entry.style.display = shouldShow ? "" : "none";
-        }
-    } else {
-        // Handle table view filtering
-        let rows = document.querySelectorAll("#tableView tbody tr");
-        let ths = document.querySelectorAll("#tableView thead th");
-        
-        rows.forEach(row => {
-            let shouldShow = true;
-            
-            if (currentLDAPAttributeFilter.enabled) {
-                shouldShow = currentLDAPAttributeFilter.attributes.every(attrFilter => {
-                    // Find the column index for this attribute
-                    let attrIndex = Array.from(ths).findIndex(th => th.textContent === attrFilter.attribute);
-                    
-                    if (attrIndex !== -1) {
-                        const cell = row.cells[attrIndex];
-                        const cellValue = cell ? cell.textContent.trim() : "";
-                        
-                        if (attrFilter.value === null) {
-                            return cellValue !== '';
-                        } else {
-                            return cellValue === attrFilter.value;
-                        }
-                    }
-                    return false;
-                });
-            }
-            
-            row.style.display = shouldShow ? "" : "none";
-        });
-    }
-}
-
-/**
- * Clears all LDAP attribute filters
- */
 function clearLDAPAttributeFilters() {
-    // Uncheck all checkboxes
     const checkboxes = document.querySelectorAll('#ldapAttributePanel input[type="checkbox"]');
     checkboxes.forEach(cb => cb.checked = false);
-    
-    // Apply the cleared filters
     applyLDAPAttributeFilter();
 }
+
+// ============================================================================
+// FILTER PANEL TOGGLE
+// ============================================================================
 
 function toggleFilterSection(panelId) {
     const panel = document.getElementById(panelId);

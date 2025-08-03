@@ -24,7 +24,7 @@ def render_entry(entry: dict, index: int) -> str:
     dn = entry.get("dn", "")
 
     # Create collapsible entry header with toggle functionality
-    html = f'<div class="entry">\n<h2 onclick="toggle(\'attr{index}\')">▶ {dn}</h2>\n<div class="attributes" id="attr{index}">'
+    html = f'<div class="entry">\n<h2 onclick="toggle(\'attr{index}\')">{dn}</h2>\n<div class="attributes" id="attr{index}">'
 
     # Build attributes table
     html += '<table class="attr-table">'
@@ -163,5 +163,5 @@ if __name__ == "__main__":
         sys.exit(1)
         
     print(logo_ascii)
-    print("LDAPViewer v1.0 - by NathanielSlw (github.com/NathanielSlw)\n")
+    print("LDAPViewer v2.0 - by NathanielSlw\n")
     main(sys.argv[1])
