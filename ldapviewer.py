@@ -152,7 +152,6 @@ logo_ascii = r"""
 """
 
 if __name__ == "__main__":
-    # Always show logo and version first
     print(logo_ascii)
     print("LDAPViewer v2.1 - by NathanielSlw\n")
     
