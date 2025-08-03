@@ -3,6 +3,7 @@
 import json
 import sys
 import os
+import argparse
 
 # ============================================================================
 # HTML RENDERING FUNCTIONS
@@ -151,10 +152,22 @@ logo_ascii = r"""
 """
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python ldapviewer.py domain_users.json")
-        sys.exit(1)
-    input_file = sys.argv[1]
+    # Always show logo and version first
+    print(logo_ascii)
+    print("LDAPViewer v2.1 - by NathanielSlw\n")
+    
+    parser = argparse.ArgumentParser(
+        description='Generates an interactive HTML interface to explore ldapdomaindump JSON files.',
+        epilog='Example: python ldapviewer.py domain_users.json\nOutput: Opens ldapviewer_domain_users.html in your browser',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser._positionals.title = 'arguments'
+    parser.add_argument('json_file', help='ldapdomaindump JSON file (domain_users.json, domain_computers.json, etc.)')
+    
+    args = parser.parse_args()
+    input_file = args.json_file
+    
+    # Validate input file
     if not os.path.isfile(input_file):
         print(f"[!] Error: Input file '{input_file}' not found.")
         sys.exit(1)
@@ -162,6 +175,4 @@ if __name__ == "__main__":
         print(f"[!] Error: Input file must have a .json extension.")
         sys.exit(1)
         
-    print(logo_ascii)
-    print("LDAPViewer v2.0 - by NathanielSlw\n")
-    main(sys.argv[1])
+    main(input_file)
