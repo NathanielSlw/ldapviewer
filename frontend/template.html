@@ -11,7 +11,18 @@
     </script>
 </head>
 <body>
-    <h1>LDAP Viewer - {filename}</h1>
+    <!-- Header avec titre et toggle theme -->
+    <div class="header-container">
+        <h1>LDAP Viewer - {filename}</h1>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+            <span class="sun-icon">🔆</span>
+            <span class="moon-icon">🌙​</span>
+            <div class="theme-toggle-slider">
+                <span class="slider-icon">🔆</span>
+            </div>
+        </button>
+    </div>
+
     <div class="controls">
         <!-- Menu principal avec emojis intégrés -->
         <div class="main-menu">

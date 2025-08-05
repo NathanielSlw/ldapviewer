@@ -1,4 +1,72 @@
 // ============================================================================
+// THEME MANAGEMENT
+// ============================================================================
+
+/**
+ * Initialize theme based on user preference or system preference
+ */
+function initTheme() {
+    const savedTheme = localStorage.getItem('theme');
+    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    
+    let currentTheme;
+    if (savedTheme) {
+        currentTheme = savedTheme;
+    } else if (systemPrefersDark) {
+        currentTheme = 'dark';
+    } else {
+        currentTheme = 'light';
+    }
+    
+    document.documentElement.setAttribute('data-theme', currentTheme);
+    updateToggleSwitch(currentTheme);
+}
+
+/**
+ * Toggle between light and dark theme
+ */
+function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    updateToggleSwitch(newTheme);
+}
+
+/**
+ * Update the visual state of the toggle switch
+ */
+function updateToggleSwitch(theme) {
+    const slider = document.querySelector('.theme-toggle-slider');
+    const sliderIcon = document.querySelector('.slider-icon');
+    
+    if (theme === 'dark') {
+        slider.classList.add('dark');
+        sliderIcon.textContent = '🌙​';
+    } else {
+        slider.classList.remove('dark');
+        sliderIcon.textContent = '🔆';
+    }
+}
+
+// Initialize theme when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    initTheme();
+});
+
+// Listen for system theme changes
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+    // Only apply system preference if user hasn't manually set a theme
+    if (!localStorage.getItem('theme')) {
+        const newTheme = e.matches ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', newTheme);
+        updateToggleSwitch(newTheme);
+    }
+});
+
+
+// ============================================================================
 // DETAIL VIEW MANAGEMENT
 // ============================================================================
 // Functions for expanding/collapsing individual entries and bulk operations
