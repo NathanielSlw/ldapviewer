@@ -37,6 +37,7 @@ Then open the generated HTML file (`ldapviewer_domain_users.html`) in your brows
 - **UAC filtering**: Filter users by UserAccountControl flags with one click.
 - **Attribute-based filtering**: Filter entries by LDAP attributes (e.g., has SPN, msDS-AllowedToDelegateTo, has Description)
 - **Modern responsive interface**: All HTML/CSS/JS is embedded and works offline.
+- **Dark mode**: Switch between light and dark themes with automatic system preference detection.
 
 ## Screenshots
 
