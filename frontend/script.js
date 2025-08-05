@@ -443,7 +443,7 @@ function hasUACFlags(userAccountControl, flags) {
     const uac = parseInt(userAccountControl, 10);
     if (isNaN(uac)) return false;
     
-    return flags.some(flag => (uac & flag) !== 0);
+    return flags.every(flag => (uac & flag) !== 0);
 }
 
 function applyUACFilter() {
