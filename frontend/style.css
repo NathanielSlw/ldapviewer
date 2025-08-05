@@ -658,6 +658,10 @@ tr:hover {
     transition: all 0.2s ease;
     box-shadow: 0 2px 6px rgba(231, 76, 60, 0.2);
     text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
 }
 
 .clear-filters-btn:hover {
@@ -671,6 +675,23 @@ tr:hover {
     font-weight: 500;
     color: var(--text-muted);
     font-size: 15px;
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-light);
+    border-radius: 20px;
+    padding: 8px 16px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px var(--shadow-light);
+    min-height: 20px;
+}
+
+.filter-status.active {
+    background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+    color: white;
+    border-color: var(--accent-primary);
+    box-shadow: 0 2px 8px rgba(74, 158, 255, 0.3);
 }
 
 /* =============================================================================
