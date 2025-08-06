@@ -6,6 +6,10 @@
 
 <!-- PROJECT LOGO -->
 <div align="center">
+  <a href="https://github.com/NathanielSlw/ldapviewer">
+    <img src="screenshots/logo.png" alt="Logo" width="120" height="120">
+  </a>
+  
 <h3 align="center">LDAP Viewer</h3>
 
   <p align="center">
