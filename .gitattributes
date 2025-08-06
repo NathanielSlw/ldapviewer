@@ -1,3 +1,4 @@
 # Exclude frontend files from GitHub Linguist statistics
+frontend/template.html linguist-generated=true
 frontend/style.css linguist-generated=true
 frontend/script.js linguist-generated=true
