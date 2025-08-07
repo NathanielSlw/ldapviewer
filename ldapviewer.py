@@ -153,7 +153,7 @@ logo_ascii = r"""
 
 if __name__ == "__main__":
     print(logo_ascii)
-    print("LDAPViewer v2.2 - by NathanielSlw\n")
+    print("LDAPViewer v2.3 - by NathanielSlw\n")
     
     parser = argparse.ArgumentParser(
         description='Generates an interactive HTML interface to explore ldapdomaindump JSON files.',
