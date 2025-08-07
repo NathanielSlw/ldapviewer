@@ -11,7 +11,7 @@
     </script>
 </head>
 <body>
-    <!-- Header avec titre et toggle theme -->
+    <!-- Header with title and toggle theme -->
     <div class="header-container">
         <h1>LDAP Viewer - {filename}</h1>
         <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
@@ -24,7 +24,7 @@
     </div>
 
     <div class="controls">
-        <!-- Menu principal avec emojis intégrés -->
+        <!-- Menu -->
         <div class="main-menu">
             <button onclick="switchView('detail')">
                 📋 Detail View
@@ -37,7 +37,7 @@
             </button>
         </div>
         
-        <!-- Sous-menu pour expand/collapse - repositionné et stylisé -->
+        <!-- Sub-menu to expand/collapse -->
         <div class="sub-menu" id="detailButtons">
             <button id="expandBtn" onclick="toggleAll(true)">Expand All</button>
             <button id="collapseBtn" onclick="toggleAll(false)">Collapse All</button>
@@ -47,132 +47,140 @@
         <input type="text" id="searchInput" onkeyup="filterEntries()" placeholder="🔍 Search LDAP object : username, email, etc." autofocus>
 
         <!-- Filter Sections -->
-        <div class="filter-sections">
-            <div class="filter-section-header" onclick="toggleFilterSection('uacFilterPanel')">
-                <span class="filter-section-title">🛡️ UAC Filters</span>
-                <span class="collapse-indicator" id="uacIndicator">▼</span>
-            </div>
-            <div id="uacFilterPanel" class="filter-panel">
-                <h4>Filter by UserAccountControl Flags:</h4>
-                
-                <!-- Security Critical Flags -->
-                <div class="filter-section">
-                    <h5 class="security-critical">🚨 Security Critical</h5>
-                    <div class="filter-grid">
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="2" data-name="DISABLED" onchange="applyUACFilter()"> 🚫 Account Disabled
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="4194304" data-name="DONT_REQUIRE_PREAUTH" onchange="applyUACFilter()"> 🔑 No Kerberos PreAuth (ASREPRoast)
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="524288" data-name="TRUSTED_FOR_DELEGATION" onchange="applyUACFilter()"> 🎯 Unconstrained Delegation
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="16777216" data-name="TRUSTED_TO_AUTH_FOR_DELEGATION" onchange="applyUACFilter()"> 🔐 Constrained Delegation (S4U2Self)
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="1048576" data-name="NOT_DELEGATED" onchange="applyUACFilter()"> 🛡️ Cannot Be Delegated
-                        </label>
-                    </div>
-                </div>
-                
-                <!-- Password Related Flags -->
-                <div class="filter-section">
-                    <h5 class="password-related">🔐 Password Related</h5>
-                    <div class="filter-grid">
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="32" data-name="PASSWORD_NOT_REQUIRED" onchange="applyUACFilter()"> 🔓 Password Not Required
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="65536" data-name="DONT_EXPIRE_PASSWORD" onchange="applyUACFilter()"> ⏰ Password Never Expires
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="64" data-name="PASSWD_CANT_CHANGE" onchange="applyUACFilter()"> 🔒 User Cannot Change Password
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="8388608" data-name="PASSWORD_EXPIRED" onchange="applyUACFilter()"> ⚠️ Password Expired
-                        </label>
-                    </div>
-                </div>
-                
-                <!-- Authentication & Access -->
-                <div class="filter-section">
-                    <h5 class="auth-access">🔑 Authentication & Access</h5>
-                    <div class="filter-grid">
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="262144" data-name="SMARTCARD_REQUIRED" onchange="applyUACFilter()"> 💳 Smartcard Required
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="16" data-name="LOCKOUT" onchange="applyUACFilter()"> 🔐 Account Locked Out
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="128" data-name="ENCRYPTED_TEXT_PWD_ALLOWED" onchange="applyUACFilter()"> 🔐 Store Password Using Reversible Encryption
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" value="2097152" data-name="USE_DES_KEY_ONLY" onchange="applyUACFilter()"> 🔓 Use DES Key Only
-                        </label>
-                    </div>
-                </div>
-                
-                <div class="filter-controls">
-                    <button onclick="clearUACFilters()" class="clear-filters-btn">Clear UAC Filters</button>
-                    <span id="uacFilterStatus" class="filter-status">No filters active</span>
-                </div>
+        <div class="filter-bar">
+            <div class="active-filters">
+                <span class="filter-label">Active Filters:</span>
+                <div id="activeFilterChips"></div>
             </div>
             
-            <div class="filter-section-header" onclick="toggleFilterSection('ldapAttributePanel')">
-                <span class="filter-section-title">🔍 LDAP Attribute Filters</span>
-                <span class="collapse-indicator" id="ldapIndicator">▼</span>
-            </div>
-            <div id="ldapAttributePanel" class="filter-panel">
-                <h4>🔍 Filter by LDAP Attributes</h4>
+            <div class="filter-dropdown">
+                <button class="filter-button" onclick="toggleFilterDropdown()">
+                    <span>🔍 Filters</span>
+                    <span class="filter-count" id="filterCount">0</span>
+                    <span class="dropdown-arrow">▼</span>
+                </button>
                 
-                <!-- Security Critical Attributes -->
-                <div class="filter-section">
-                    <h5 class="security-critical">🚨 Security Critical Attributes</h5>
-                    <div class="filter-grid">
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" data-attribute="servicePrincipalName" onchange="applyLDAPAttributeFilter()"> 🎯 Has SPN (Kerberoastable)
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" data-attribute="msDS-AllowedToDelegateTo" onchange="applyLDAPAttributeFilter()"> 🔐 Constrained Delegation Target
-                        </label>
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" data-attribute="adminCount" data-value="1" onchange="applyLDAPAttributeFilter()"> 👑 AdminCount = 1 (Was or is AdminSDHolder protected)
-                        </label>
+                <div class="filter-menu" id="filterMenu">
+                    <div class="filter-tabs">
+                        <button class="filter-tab active" onclick="switchFilterTab('uac')">🛡️ UAC</button>
+                        <button class="filter-tab" onclick="switchFilterTab('ldap')">🔍 LDAP</button>
+                        <button class="filter-tab" onclick="switchFilterTab('general')">⚙️ General</button>
+                    </div>
+                    
+                    <div class="filter-content">
+                        <!-- UAC Tab -->
+                        <div id="uacTab" class="filter-tab-content active">
+                            <div class="filter-chips-section">
+                                <h6>🚨 Security Critical</h6>
+                                <div class="filter-chips">
+                                    <button class="filter-chip" data-value="2" data-name="DISABLED" onclick="toggleFilterChip(this, 'uac')">
+                                        🚫 Account Disabled
+                                    </button>
+                                    <button class="filter-chip" data-value="4194304" data-name="DONT_REQUIRE_PREAUTH" onclick="toggleFilterChip(this, 'uac')">
+                                        🔑 No Kerberos PreAuth
+                                    </button>
+                                    <button class="filter-chip" data-value="524288" data-name="TRUSTED_FOR_DELEGATION" onclick="toggleFilterChip(this, 'uac')">
+                                        🎯 Unconstrained Delegation
+                                    </button>
+                                    <button class="filter-chip" data-value="16777216" data-name="TRUSTED_TO_AUTH_FOR_DELEGATION" onclick="toggleFilterChip(this, 'uac')">
+                                        🔐 Constrained Delegation
+                                    </button>
+                                    <button class="filter-chip" data-value="1048576" data-name="NOT_DELEGATED" onclick="toggleFilterChip(this, 'uac')">
+                                        🛡️ Cannot Be Delegated
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="filter-chips-section">
+                                <h6>🔐 Password Related</h6>
+                                <div class="filter-chips">
+                                    <button class="filter-chip" data-value="32" data-name="PASSWORD_NOT_REQUIRED" onclick="toggleFilterChip(this, 'uac')">
+                                        🔓 Password Not Required
+                                    </button>
+                                    <button class="filter-chip" data-value="65536" data-name="DONT_EXPIRE_PASSWORD" onclick="toggleFilterChip(this, 'uac')">
+                                        ⏰ Password Never Expires
+                                    </button>
+                                    <button class="filter-chip" data-value="64" data-name="PASSWD_CANT_CHANGE" onclick="toggleFilterChip(this, 'uac')">
+                                        🔒 User Cannot Change Password
+                                    </button>
+                                    <button class="filter-chip" data-value="8388608" data-name="PASSWORD_EXPIRED" onclick="toggleFilterChip(this, 'uac')">
+                                        ⚠️ Password Expired
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="filter-chips-section">
+                                <h6>🔑 Authentication & Access</h6>
+                                <div class="filter-chips">
+                                    <button class="filter-chip" data-value="262144" data-name="SMARTCARD_REQUIRED" onclick="toggleFilterChip(this, 'uac')">
+                                        💳 Smartcard Required
+                                    </button>
+                                    <button class="filter-chip" data-value="16" data-name="LOCKOUT" onclick="toggleFilterChip(this, 'uac')">
+                                        🔐 Account Locked Out
+                                    </button>
+                                    <button class="filter-chip" data-value="128" data-name="ENCRYPTED_TEXT_PWD_ALLOWED" onclick="toggleFilterChip(this, 'uac')">
+                                        🔐 Reversible Encryption
+                                    </button>
+                                    <button class="filter-chip" data-value="2097152" data-name="USE_DES_KEY_ONLY" onclick="toggleFilterChip(this, 'uac')">
+                                        🔓 Use DES Key Only
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- LDAP Tab -->
+                        <div id="ldapTab" class="filter-tab-content">
+                            <div class="filter-chips-section">
+                                <h6>🚨 Security Critical Attributes</h6>
+                                <div class="filter-chips">
+                                    <button class="filter-chip" data-attribute="servicePrincipalName" onclick="toggleFilterChip(this, 'ldap')">
+                                        🎯 Has SPN (Kerberoastable)
+                                    </button>
+                                    <button class="filter-chip" data-attribute="msDS-AllowedToDelegateTo" onclick="toggleFilterChip(this, 'ldap')">
+                                        🔐 Constrained Delegation Target
+                                    </button>
+                                    <button class="filter-chip" data-attribute="adminCount" data-value="1" onclick="toggleFilterChip(this, 'ldap')">
+                                        👑 AdminCount = 1
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="filter-chips-section">
+                                <h6>📝 Information Disclosure</h6>
+                                <div class="filter-chips">
+                                    <button class="filter-chip" data-attribute="description" onclick="toggleFilterChip(this, 'ldap')">
+                                        📄 Has Description
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- General Tab -->
+                        <div id="generalTab" class="filter-tab-content">
+                            <div class="filter-chips-section">
+                                <h6>⚙️ General Options</h6>
+                                <div class="filter-chips">
+                                    <button class="filter-chip" id="nonDefaultChip" onclick="toggleNonDefaultChip(this)">
+                                        👁️ Non-default objects only
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-actions">
+                        <button class="clear-all-btn" onclick="clearAllFilters()">Clear All</button>
+                        <button class="close-filters-btn" onclick="toggleFilterDropdown()">Close</button>
                     </div>
                 </div>
-                
-                <!-- Information Disclosure -->
-                <div class="filter-section">
-                    <h5 class="info-disclosure">📝 Information Disclosure</h5>
-                    <div class="filter-grid">
-                        <label class="filter-checkbox-label">
-                            <input type="checkbox" data-attribute="description" onchange="applyLDAPAttributeFilter()"> 📄 Has Description
-                        </label>
-                    </div>
-                </div>
-                
-                <!-- Controls -->
-                <div class="filter-controls">
-                    <button onclick="clearLDAPAttributeFilters()" class="clear-filters-btn">Clear LDAP Filters</button>
-                    <span id="ldapAttributeFilterStatus" class="filter-status">No filters active</span>
-                </div>
             </div>
-
-            <!-- Checkbox pour non-default objects -->
-            <label class="filter-checkbox-label" style="margin-top: 10px;">
-                <input type="checkbox" id="nonDefaultCheckbox" onchange="toggleNonDefault()">
-                👁️ See non-default objects only
-            </label>
         </div>
 
-        <!-- Compteur de résultats -->
+        <!-- Results Counter -->
         <div id="resultsCount">0 results / 0 objects</div>
     </div>
-    
-    <!-- Vues principales -->
+
+    <!-- Main Views -->
     <div id="detailView">
         {detail_content}
     </div>
