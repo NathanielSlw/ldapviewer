@@ -73,6 +73,10 @@ Then open the generated HTML file (`ldapviewer_domain_users.html`) in your brows
 - **Modern responsive interface**: All HTML/CSS/JS is embedded and works offline.
 - **Dark mode**: Switch between light and dark themes with automatic system preference detection.
 
+## Roadmap
+
+See the [project roadmap](https://github.com/users/NathanielSlw/projects/2) for a full list of planned features, improvements, and known issues.
+
 ## Screenshots
 
 ### Main View
@@ -89,9 +93,9 @@ Then open the generated HTML file (`ldapviewer_domain_users.html`) in your brows
 
 ![LDAP Filters](screenshots/ldap_filters.png)
 
-## Roadmap
+### Dark Mode
 
-See the [project roadmap](https://github.com/users/NathanielSlw/projects/2) for a full list of planned features, improvements, and known issues.
+![Dark mode main view](screenshots/main_view_dark.png)
 
 
 [contributors-shield]: https://img.shields.io/github/contributors/NathanielSlw/ldapviewer.svg?style=for-the-badge
