@@ -1,0 +1,112 @@
+{
+    "0x0001": {
+        "name": "SCRIPT",
+        "severity": "info",
+        "description": "The logon script is executed"
+    },
+    "0x0002": {
+        "name": "ACCOUNTDISABLE",
+        "severity": "critical",
+        "description": "The user account is disabled"
+    },
+    "0x0008": {
+        "name": "HOMEDIR_REQUIRED",
+        "severity": "info",
+        "description": "The home directory is required"
+    },
+    "0x0010": {
+        "name": "LOCKOUT",
+        "severity": "critical",
+        "description": "The account is currently locked out"
+    },
+    "0x0020": {
+        "name": "PASSWD_NOTREQD",
+        "severity": "critical",
+        "description": "No password is required"
+    },
+    "0x0040": {
+        "name": "PASSWD_CANT_CHANGE",
+        "severity": "warning",
+        "description": "The user can't change the password"
+    },
+    "0x0080": {
+        "name": "ENCRYPTED_TEXT_PWD_ALLOWED",
+        "severity": "warning",
+        "description": "The user can send an encrypted password"
+    },
+    "0x0100": {
+        "name": "TEMP_DUPLICATE_ACCOUNT",
+        "severity": "info",
+        "description": "It's an account for users whose primary account is in another domain"
+    },
+    "0x0200": {
+        "name": "NORMAL_ACCOUNT",
+        "severity": "info",
+        "description": "It's a default account type that represents a typical user"
+    },
+    "0x0800": {
+        "name": "INTERDOMAIN_TRUST_ACCOUNT",
+        "severity": "security",
+        "description": "It's a permit to trust account for a system domain that trusts other domains"
+    },
+    "0x1000": {
+        "name": "WORKSTATION_TRUST_ACCOUNT",
+        "severity": "info",
+        "description": "It's a computer account for a computer that is running Microsoft Windows NT 4.0 Workstation, NT 4.0 Server, 2000 PRO or 2000 server and is a member of this domain"
+    },
+    "0x2000": {
+        "name": "SERVER_TRUST_ACCOUNT",
+        "severity": "info",
+        "description": "It's a computer account for a domain controller that is a member of this domain"
+    },
+    "0x10000": {
+        "name": "DONT_EXPIRE_PASSWORD",
+        "severity": "warning",
+        "description": "The password for this account will never expire"
+    },
+    "0x20000": {
+        "name": "MNS_LOGON_ACCOUNT",
+        "severity": "info",
+        "description": "It's an MNS logon account"
+    },
+    "0x40000": {
+        "name": "SMARTCARD_REQUIRED",
+        "severity": "security",
+        "description": "The user must log on using a smart card"
+    },
+    "0x80000": {
+        "name": "TRUSTED_FOR_DELEGATION",
+        "severity": "critical",
+        "description": "The service account is trusted for Kerberos delegation"
+    },
+    "0x100000": {
+        "name": "NOT_DELEGATED",
+        "severity": "security",
+        "description": "The security context of the user will not be delegated to a service even if the service account is set as trusted for Kerberos delegation"
+    },
+    "0x200000": {
+        "name": "USE_DES_KEY_ONLY",
+        "severity": "warning",
+        "description": "Restrict this principal to use only Data Encryption Standard (DES) encryption types for keys"
+    },
+    "0x400000": {
+        "name": "DONT_REQ_PREAUTH",
+        "severity": "critical",
+        "description": "This account does not require Kerberos pre-authentication for logon"
+    },
+    "0x800000": {
+        "name": "PASSWORD_EXPIRED",
+        "severity": "warning",
+        "description": "The user's password has expired"
+    },
+    "0x1000000": {
+        "name": "TRUSTED_TO_AUTH_FOR_DELEGATION",
+        "severity": "security",
+        "description": "The account is enabled for delegation. The user or computer account must be explicitly configured with the Trusted for Delegation setting when delegation is a controlled use authorization"
+    },
+    "0x04000000": {
+        "name": "PARTIAL_SECRETS_ACCOUNT",
+        "severity": "info",
+        "description": "The account is a read-only domain controller (RODC). It is a security-sensitive setting"
+    }
+}

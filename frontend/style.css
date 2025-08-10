@@ -824,3 +824,125 @@ tr:hover {
     border-radius: 8px;
     border-left: 4px solid var(--accent-primary);
 }
+
+
+/* =============================================================================
+   UAC FLAGS STYLING
+   ============================================================================= */
+
+.uac-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.uac-flags-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.uac-flag {
+    display: inline-block;
+    background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-secondary) 100%);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 16px;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    transition: all 0.2s ease;
+    cursor: help;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    position: relative;
+}
+
+.uac-flag:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.uac-flag::after {
+    content: attr(data-description);
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--text-primary);
+    color: var(--bg-secondary);
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    z-index: 1000;
+    box-shadow: 0 2px 8px var(--shadow-strong);
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease;
+    pointer-events: none;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.uac-flag::before {
+    content: '';
+    position: absolute;
+    bottom: calc(100% + 3px);
+    left: 50%;
+    transform: translateX(-50%);
+    border: 4px solid transparent;
+    border-top-color: var(--text-primary);
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease;
+}
+
+.uac-flag:hover::after,
+.uac-flag:hover::before {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Colors by criticity */
+.uac-flag.critical {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+}
+
+.uac-flag.critical::after {
+    background: #e74c3c;
+}
+
+.uac-flag.critical::before {
+    border-top-color: #e74c3c;
+}
+
+.uac-flag.warning {
+    background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+}
+
+.uac-flag.warning::after {
+    background: #f39c12;
+}
+
+.uac-flag.warning::before {
+    border-top-color: #f39c12;
+}
+
+.uac-flag.security {
+    background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+}
+
+.uac-flag.security::after {
+    background: #9b59b6;
+}
+
+.uac-flag.security::before {
+    border-top-color: #9b59b6;
+}
+
+

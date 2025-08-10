@@ -168,8 +168,11 @@
                             <div class="filter-chips-section">
                                 <h6>⚙️ General Options</h6>
                                 <div class="filter-chips">
-                                    <button class="filter-chip" id="nonDefaultChip" onclick="toggleNonDefaultChip(this)">
-                                        👁️ Non-default objects only
+                                    <button class="filter-chip" id="nonDefaultChip" onclick="toggleGeneralFilter(this, 'nonDefault')">
+                                        🛠️ Non-default objects only
+                                    </button>
+                                    <button class="filter-chip" id="defaultOnlyChip" onclick="toggleGeneralFilter(this, 'default')">
+                                        🏛️ Default objects only
                                     </button>
                                 </div>
                             </div>

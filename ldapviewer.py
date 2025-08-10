@@ -6,6 +6,103 @@ import os
 import argparse
 
 # ============================================================================
+# UAC FLAGS DEFINITION
+# ============================================================================
+# User Account Control flags mapping with severity and descriptions
+
+def load_uac_flags():
+    """
+    Load UAC flags from external JSON file
+    
+    Returns:
+        dict: UAC flags mapping with integer keys
+    """
+    base_dir = os.path.dirname(os.path.realpath(__file__))
+    uac_file = os.path.join(base_dir, "uac_flags.json")
+    
+    # Default minimal flags for fallback
+    default_flags = {
+        0x0200: {"name": "NORMAL_ACCOUNT", "severity": "info", "description": "Standard user account"},
+        0x0002: {"name": "ACCOUNTDISABLE", "severity": "critical", "description": "User account is disabled"},
+        0x10000: {"name": "DONT_EXPIRE_PASSWORD", "severity": "warning", "description": "Password never expires"}
+    }
+
+    try:
+        with open(uac_file, "r", encoding="utf-8") as f:
+            uac_data = json.load(f)
+        
+        # Convert hex string keys to integers
+        uac_flags = {}
+        for hex_key, flag_info in uac_data.items():
+            int_key = int(hex_key, 16)
+            uac_flags[int_key] = flag_info
+        
+        return uac_flags
+    except FileNotFoundError:
+        print(f"[!] Warning: UAC flags file '{uac_file}' not found. Using default flags.")
+        return default_flags
+    except json.JSONDecodeError:
+        print(f"[!] Warning: Invalid JSON in UAC flags file. Using default flags.")
+        return default_flags
+
+# Load UAC flags from JSON file or use defaults
+UAC_FLAGS = load_uac_flags()
+
+def decode_uac_flags(uac_value):
+    """
+    Decode UAC flags from integer value
+    
+    Args:
+        uac_value: Integer value of userAccountControl
+        
+    Returns:
+        list: List of dictionaries with flag information
+    """
+    if not isinstance(uac_value, int):
+        try:
+            uac_value = int(uac_value)
+        except (ValueError, TypeError):
+            return []
+    
+    active_flags = []
+    for flag_value, flag_info in UAC_FLAGS.items():
+        if uac_value & flag_value:
+            active_flags.append(flag_info)
+    
+    return active_flags
+
+def format_uac_display_html(uac_value, flags):
+    """
+    Format UAC value with flags for HTML display with enhanced styling
+    
+    Args:
+        uac_value: Original UAC value
+        flags: List of flag dictionaries
+        
+    Returns:
+        str: Formatted HTML string with enhanced UAC display
+    """
+    if not flags:
+        return f'<span class="uac-value">{uac_value}</span>'
+    
+    # Build flags HTML
+    flags_html = ""
+    for flag in flags:
+        name = flag["name"]
+        severity = flag["severity"]
+        description = flag["description"]
+        flags_html += f'<span class="uac-flag {severity}" data-flag="{name}" data-description="{description}">{name}</span>'
+    
+    return f'''
+    <div class="uac-container">
+        <div class="uac-value">{uac_value}</div>
+        <div class="uac-flags-grid">
+            {flags_html}
+        </div>
+    </div>
+    '''
+
+# ============================================================================
 # HTML RENDERING FUNCTIONS
 # ============================================================================
 # Functions to convert LDAP data into HTML format for web display
@@ -31,6 +128,16 @@ def render_entry(entry: dict, index: int) -> str:
     html += '<table class="attr-table">'
     for key, values in attributes.items():
         val = ', '.join(map(str, values))
+
+        # Special handling for userAccountControl
+        if key == "userAccountControl" and values:
+            try:
+                uac_value = int(values[0])
+                uac_flags = decode_uac_flags(uac_value)
+                val = format_uac_display_html(uac_value, uac_flags)
+            except (ValueError, TypeError):
+                pass
+
         html += f'<tr><td class="key">{key}</td><td class="value">{val}</td></tr>\n'
     html += "</table>\n</div>\n</div>\n"
     return html
@@ -78,6 +185,16 @@ def render_table(data: list, keys: list) -> str:
         for k in keys:
             values = attributes.get(k, [])
             val = ', '.join(map(str, values))
+
+            # Special handling for userAccountControl
+            if k == "userAccountControl" and values:
+                try:
+                    uac_value = int(values[0])
+                    uac_flags = decode_uac_flags(uac_value)
+                    val = format_uac_display_html(uac_value, uac_flags)
+                except (ValueError, TypeError):
+                    pass
+
             html += f"<td>{val}</td>"
         html += "</tr>\n"
     html += "</tbody>\n</table>\n"
@@ -153,25 +270,28 @@ logo_ascii = r"""
 
 if __name__ == "__main__":
     print(logo_ascii)
-    print("LDAPViewer v2.3 - by NathanielSlw\n")
+    print("LDAPViewer v2.4 - by NathanielSlw\n")
     
     parser = argparse.ArgumentParser(
         description='Generates an interactive HTML interface to explore ldapdomaindump JSON files.',
-        epilog='Example: python ldapviewer.py domain_users.json\nOutput: Opens ldapviewer_domain_users.html in your browser',
+        epilog='Examples:\n  python ldapviewer.py domain_users.json\n  python ldapviewer.py domain_users.json domain_computers.json\n  python ldapviewer.py *.json',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser._positionals.title = 'arguments'
-    parser.add_argument('json_file', help='ldapdomaindump JSON file (domain_users.json, domain_computers.json, etc.)')
-    
+    parser.add_argument('json_files', nargs='+', help='One or more ldapdomaindump JSON files (domain_users.json, domain_computers.json, etc.)')
+
     args = parser.parse_args()
-    input_file = args.json_file
+    input_files = args.json_files
     
-    # Validate input file
-    if not os.path.isfile(input_file):
-        print(f"[!] Error: Input file '{input_file}' not found.")
-        sys.exit(1)
-    if not input_file.lower().endswith('.json'):
-        print(f"[!] Error: Input file must have a .json extension.")
-        sys.exit(1)
-        
-    main(input_file)
+    # Validate input files
+    for input_file in input_files:
+        if not os.path.isfile(input_file):
+            print(f"[!] Error: Input file '{input_file}' not found.")
+            sys.exit(1)
+        if not input_file.lower().endswith('.json'):
+            print(f"[!] Error: Input file '{input_file}' must have a .json extension.")
+            sys.exit(1)
+
+    # Process each file
+    for input_file in input_files:
+        main(input_file)

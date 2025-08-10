@@ -51,7 +51,7 @@ function updateToggleSwitch(theme) {
 }
 
 // ============================================================================
-// DETAIL VIEW MANAGEMENT
+// DETAIL VIEW CONTROLS
 // ============================================================================
 // Functions for expanding/collapsing individual entries and bulk operations
 
@@ -181,8 +181,21 @@ function hasLDAPAttribute(entry, attributeName, expectedValue = null) {
     return attributeValue === expectedValue;
 }
 
+function applyRIDFilter(rid, ridFilterType) {
+    if (!ridFilterType || rid === null) return true;
+    
+    switch (ridFilterType) {
+        case 'default':
+            return rid <= 1000;
+        case 'nonDefault':
+            return rid > 1000;
+        default:
+            return true;
+    }
+}
+
 // ============================================================================
-// FILTERING SYSTEM
+// CORE FILTERING ENGINE
 // ============================================================================
 // Centralized filtering that applies all active filters together
 
@@ -192,7 +205,10 @@ let currentView = 'detail';
 // Filter states
 let filterStates = {
     search: '',
-    nonDefaultOnly: false,
+    general: {
+        enabled: false,
+        ridFilter: null // 'default' (<=1000), 'nonDefault' (>1000), or null (everyone)
+    },
     uac: {
         enabled: false,
         flags: []
@@ -229,9 +245,9 @@ function applyFiltersToDetailView() {
             const text = entry.innerText.toLowerCase();
             shouldShow = text.includes(filterStates.search);
         }
-        
-        // Apply non-default filter
-        if (filterStates.nonDefaultOnly && shouldShow) {
+
+        // Apply RID-based filter (default/non-default)
+        if (filterStates.general.enabled && shouldShow) {
             const objectSIDCell = Array.from(entry.getElementsByClassName('key'))
                 .find(cell => cell.textContent === 'objectSid');
             let rid = null;
@@ -239,7 +255,7 @@ function applyFiltersToDetailView() {
                 const valueCell = objectSIDCell.nextElementSibling;
                 rid = getRIDFromObjectSID(valueCell ? valueCell.textContent : "");
             }
-            shouldShow = (rid !== null && rid >= 1000);
+            shouldShow = applyRIDFilter(rid, filterStates.general.ridFilter);
         }
         
         // Apply UAC filter
@@ -287,16 +303,16 @@ function applyFiltersToTableView() {
             shouldShow = text.includes(filterStates.search);
         }
         
-        // Apply non-default filter
-        if (filterStates.nonDefaultOnly && shouldShow) {
+        // Apply RID-based filter (default/non-default)
+        if (filterStates.general.enabled && shouldShow) {
             let rid = null;
             if (objectSIDIndex !== -1) {
                 const cell = row.cells[objectSIDIndex];
                 rid = getRIDFromObjectSID(cell ? cell.textContent : "");
             }
-            shouldShow = (rid !== null && rid >= 1000);
+            shouldShow = applyRIDFilter(rid, filterStates.general.ridFilter);
         }
-        
+
         // Apply UAC filter
         if (filterStates.uac.enabled && shouldShow) {
             if (uacIndex !== -1) {
@@ -358,6 +374,57 @@ function updateResultsCount() {
 }
 
 // ============================================================================
+// FILTER SPECIFIC LOGIC
+// ============================================================================
+
+function applyUACFilter() {
+    const activeChips = document.querySelectorAll('#uacTab .filter-chip.active');
+    const selectedFlags = Array.from(activeChips).map(chip => parseInt(chip.dataset.value, 10));
+    
+    filterStates.uac.enabled = selectedFlags.length > 0;
+    filterStates.uac.flags = selectedFlags;
+    
+    applyAllFilters();
+}
+
+function applyLDAPAttributeFilter() {
+    const activeChips = document.querySelectorAll('#ldapTab .filter-chip.active');
+    const selectedAttributes = Array.from(activeChips).map(chip => ({
+        attribute: chip.dataset.attribute,
+        value: chip.dataset.value || null
+    }));
+    
+    filterStates.ldapAttributes.enabled = selectedAttributes.length > 0;
+    filterStates.ldapAttributes.attributes = selectedAttributes;
+    
+    applyAllFilters();
+}
+
+function toggleGeneralFilter(element, filterType) {
+    const isActive = element.classList.contains('active');
+    
+    // Désactiver tous les filtres généraux d'abord
+    document.querySelectorAll('#generalTab .filter-chip').forEach(chip => {
+        chip.classList.remove('active');
+    });
+    
+    // Si le chip n'était pas actif, l'activer
+    if (!isActive) {
+        element.classList.add('active');
+        filterStates.general.enabled = true;
+        filterStates.general.ridFilter = filterType;
+    } else {
+        // Si il était actif et qu'on clique dessus, le désactiver
+        filterStates.general.enabled = false;
+        filterStates.general.ridFilter = null;
+    }
+    
+    updateActiveFilterChips();
+    updateFilterCount();
+    applyAllFilters();
+}
+
+// ============================================================================
 // FILTER UI COMPONENTS
 // ============================================================================
 
@@ -397,15 +464,6 @@ function toggleFilterChip(element, filterType) {
     updateFilterCount();
 }
 
-function toggleNonDefaultChip(element) {
-    element.classList.toggle('active');
-    filterStates.nonDefaultOnly = element.classList.contains('active');
-    
-    updateActiveFilterChips();
-    updateFilterCount();
-    applyAllFilters();
-}
-
 function updateActiveFilterChips() {
     const container = document.getElementById('activeFilterChips');
     container.innerHTML = '';
@@ -424,12 +482,12 @@ function updateActiveFilterChips() {
         container.appendChild(chipElement);
     });
     
-    // Non-default filter
-    const nonDefaultChip = document.getElementById('nonDefaultChip');
-    if (nonDefaultChip && nonDefaultChip.classList.contains('active')) {
-        const chipElement = createActiveFilterChip(nonDefaultChip.textContent.trim(), 'general', nonDefaultChip);
+    // General filters (RID-based)
+    const generalChips = document.querySelectorAll('#generalTab .filter-chip.active');
+    generalChips.forEach(chip => {
+        const chipElement = createActiveFilterChip(chip.textContent.trim(), 'general', chip);
         container.appendChild(chipElement);
-    }
+    });
 }
 
 function createActiveFilterChip(text, type, originalElement) {
@@ -465,9 +523,11 @@ function removeActiveFilter(type, removeButton) {
         });
         applyLDAPAttributeFilter();
     } else if (type === 'general') {
-        const nonDefaultChip = document.getElementById('nonDefaultChip');
-        nonDefaultChip.classList.remove('active');
-        filterStates.nonDefaultOnly = false;
+        document.querySelectorAll('#generalTab .filter-chip.active').forEach(chip => {
+            chip.classList.remove('active');
+        });
+        filterStates.general.enabled = false;
+        filterStates.general.ridFilter = null;
         applyAllFilters();
     }
     
@@ -491,37 +551,15 @@ function clearAllFilters() {
     filterStates.uac.flags = [];
     filterStates.ldapAttributes.enabled = false;
     filterStates.ldapAttributes.attributes = [];
-    filterStates.nonDefaultOnly = false;
-    
+    filterStates.general.enabled = false;
+    filterStates.general.ridFilter = null;
+
     updateActiveFilterChips();
     updateFilterCount();
     applyAllFilters();
     
     // Close dropdown
     toggleFilterDropdown();
-}
-
-function applyUACFilter() {
-    const activeChips = document.querySelectorAll('#uacTab .filter-chip.active');
-    const selectedFlags = Array.from(activeChips).map(chip => parseInt(chip.dataset.value, 10));
-    
-    filterStates.uac.enabled = selectedFlags.length > 0;
-    filterStates.uac.flags = selectedFlags;
-    
-    applyAllFilters();
-}
-
-function applyLDAPAttributeFilter() {
-    const activeChips = document.querySelectorAll('#ldapTab .filter-chip.active');
-    const selectedAttributes = Array.from(activeChips).map(chip => ({
-        attribute: chip.dataset.attribute,
-        value: chip.dataset.value || null
-    }));
-    
-    filterStates.ldapAttributes.enabled = selectedAttributes.length > 0;
-    filterStates.ldapAttributes.attributes = selectedAttributes;
-    
-    applyAllFilters();
 }
 
 // ============================================================================
