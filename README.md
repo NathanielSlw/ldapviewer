@@ -32,8 +32,8 @@
     <li><a href="#why">Why</a></li>
     <li><a href="#usage">Usage</a></li>
     <li><a href="#features">Features</a></li>
-    <li><a href="#screenshots">Screenshots</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#screenshots">Screenshots</a></li>
   </ol>
 </details>
 
@@ -58,6 +58,13 @@ To visualize a domain users dump:
 python ldapviewer.py domain_users.json
 ```
 Then open the generated HTML file (`ldapviewer_domain_users.html`) in your browser.
+
+---
+
+You can also launch ldapviewer with multiple JSON files at once:
+```sh
+python ldapviewer.py *.json
+```
 
 ## Features
 
