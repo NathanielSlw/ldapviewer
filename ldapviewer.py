@@ -107,6 +107,27 @@ def format_uac_display_html(uac_value, flags):
 # ============================================================================
 # Functions to convert LDAP data into HTML format for web display
 
+def extract_display_name(attributes, dn):
+    """
+    Extract display name from LDAP entry attributes or DN
+    
+    Args:
+        attributes (dict): LDAP entry attributes
+        dn (str): Distinguished Name
+        
+    Returns:
+        str: Display name (CN value or extracted from DN)
+    """
+    # Extract CN from attributes, fallback to DN if CN doesn't exist
+    cn_values = attributes.get("cn", [])
+    if cn_values:
+        return cn_values[0]  # Take the first CN value
+    else:  
+        if dn and dn.upper().startswith('CN='):
+            return dn.split(',')[0][3:]  # Remove "CN=" prefix
+        else:
+            return dn
+        
 def render_entry(entry: dict, index: int) -> str:
     """
     Renders a single LDAP entry as HTML for the detail view
@@ -121,8 +142,10 @@ def render_entry(entry: dict, index: int) -> str:
     attributes = entry.get("attributes", {})
     dn = entry.get("dn", "")
 
+    display_name = extract_display_name(attributes, dn)
+        
     # Create collapsible entry header with toggle functionality
-    html = f'<div class="entry">\n<h2 onclick="toggle(\'attr{index}\')">{dn}</h2>\n<div class="attributes" id="attr{index}">'
+    html = f'<div class="entry">\n<h2 onclick="toggle(\'attr{index}\')">{display_name}</h2>\n<div class="attributes" id="attr{index}">'
 
     # Build attributes table
     html += '<table class="attr-table">'
@@ -141,6 +164,7 @@ def render_entry(entry: dict, index: int) -> str:
         html += f'<tr><td class="key">{key}</td><td class="value">{val}</td></tr>\n'
     html += "</table>\n</div>\n</div>\n"
     return html
+
 
 def gather_all_keys(data: list) -> list:
     """
@@ -179,7 +203,9 @@ def render_table(data: list, keys: list) -> str:
     for entry in data:
         attributes = entry.get("attributes", {})
         dn = entry.get("dn", "")
-        html += f"<tr><td>{dn}</td>"
+        display_name = extract_display_name(attributes, dn)
+        
+        html += f"<tr><td>{display_name}</td>"
 
         # Add cell for each attribute column
         for k in keys:
