@@ -461,6 +461,84 @@ button:hover {
 }
 
 /* =============================================================================
+   Entry Header + Groups Chips
+   ============================================================================= */
+
+.entry-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    cursor: pointer;
+    gap: 15px;
+}
+
+.entry-header h2 {
+    margin: 0;
+    flex-grow: 1;
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+/* Group chip container */
+.groups-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    flex-shrink: 0;
+    max-width: 60%;
+}
+
+/* Group chip styles */
+.group-chip {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 500;
+    white-space: nowrap;
+    border: 1px solid;
+    cursor: default;
+    position: relative;
+}
+
+.group-chip.admin-group {
+    background-color: #fee2e2;
+    color: #dc2626;
+    border-color: #fca5a5;
+}
+
+.group-chip.user-group {
+    background-color: #dbeafe;
+    color: #2563eb;
+    border-color: #93c5fd;
+}
+
+.group-chip.other-group {
+    background-color: #f3f4f6;
+    color: #6b7280;
+    border-color: #d1d5db;
+}
+
+/* Dark Mode on group chips */
+[data-theme="dark"] .group-chip.admin-group {
+    background-color: #7f1d1d;
+    color: #fca5a5;
+    border-color: #dc2626;
+}
+
+[data-theme="dark"] .group-chip.user-group {
+    background-color: #1e3a8a;
+    color: #93c5fd;
+    border-color: #2563eb;
+}
+
+[data-theme="dark"] .group-chip.other-group {
+    background-color: #374151;
+    color: #d1d5db;
+    border-color: #6b7280;
+}
+
+/* =============================================================================
    ATTRIBUTE TABLE
    ============================================================================= */
 

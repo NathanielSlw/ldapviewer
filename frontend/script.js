@@ -61,7 +61,7 @@ function updateToggleSwitch(theme) {
  */
 function toggle(id) {
     const elem = document.getElementById(id);
-    const header = elem.previousElementSibling;
+    const header = elem.previousElementSibling.querySelector('h2');
     if (elem.style.display === "none" || elem.style.display === "") {
         elem.style.display = "block";
         header.classList.add('expanded');
