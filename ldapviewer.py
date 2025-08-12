@@ -103,9 +103,9 @@ def format_uac_display_html(uac_value, flags):
     '''
 
 # ============================================================================
-# HTML RENDERING FUNCTIONS
+# LDAP DATA PROCESSING UTILITIES
 # ============================================================================
-# Functions to convert LDAP data into HTML format for web display
+# Helper functions to extract and process LDAP entry data
 
 def extract_display_name(attributes, dn):
     """
@@ -127,7 +127,120 @@ def extract_display_name(attributes, dn):
             return dn.split(',')[0][3:]  # Remove "CN=" prefix
         else:
             return dn
+   
+def extract_group_names(memberof_values, attributes):
+    """
+    Extract group names from memberOf attribute values and primary group
+    
+    Args:
+        memberof_values (list): List of memberOf DN strings
+        attributes (dict): All LDAP attributes (to get primary group info)
         
+    Returns:
+        list: List of clean group names including primary group
+    """
+    group_names = []
+    
+    # Extract groups from memberOf attribute
+    if memberof_values:
+        for memberof_entry in memberof_values:
+            if isinstance(memberof_entry, str):    
+                # Split by comma and take the first part
+                first_part = memberof_entry.split(',')[0].strip()
+                
+                if first_part.upper().startswith('CN='):
+                    # Extract group name after "CN="
+                    group_name = first_part[3:].strip()  # Remove "CN=" prefix
+                    
+                    if group_name and group_name not in group_names:
+                        group_names.append(group_name)
+    
+   
+    # Primary group ID to name mapping
+    PRIMARY_GROUP_MAPPING = {
+        512: "Domain Admins",
+        513: "Domain Users", 
+        514: "Domain Guests",
+        515: "Domain Computers",
+        516: "Domain Controllers",
+        517: "Cert Publishers",
+        518: "Schema Admins",
+        519: "Enterprise Admins",
+        520: "Group Policy Creator Owners",
+        521: "Read-only Domain Controllers",
+        522: "Cloneable Domain Controllers",
+        525: "Protected Users",
+        526: "Key Admins",
+        527: "Enterprise Key Admins"
+    }
+
+    # Add primary group (usually "Domain Users" for standard users)
+    # The primary group is determined by primaryGroupID attribute
+    primary_group_id = attributes.get("primaryGroupID", [])
+    if primary_group_id:
+        try:
+            group_id = int(primary_group_id[0])
+            primary_group_name = PRIMARY_GROUP_MAPPING.get(group_id, f"Primary Group ({group_id})")
+            
+            # Add primary group if not already in the list
+            if primary_group_name not in group_names:
+                group_names.append(primary_group_name)
+                
+        except (ValueError, TypeError, IndexError):
+            pass
+    
+    return group_names
+
+def gather_all_keys(data: list) -> list:
+    """
+    Collects all unique attribute keys from all LDAP entries
+    
+    Args:
+        data (list): List of LDAP entry dictionaries
+        
+    Returns:
+        list: Sorted list of all unique attribute names found across all entries
+    """
+    keys = set()
+    for entry in data:
+        attributes = entry.get("attributes", {})
+        keys.update(attributes.keys())
+    return sorted(keys)
+
+# ============================================================================
+# HTML RENDERING FUNCTIONS
+# ============================================================================
+# Functions to convert LDAP data into HTML format for web display
+
+def format_groups_chips_html(group_names):
+    """
+    Format group names as HTML chips
+    
+    Args:
+        group_names (list): List of group names
+        
+    Returns:
+        str: HTML string with group chips
+    """
+    if not group_names:
+        return ""
+    
+    chips_html = '<div class="groups-chips">'
+    for group_name in group_names:
+        # Determine chip class based on group type
+        chip_class = "group-chip"
+        if "admin" in group_name.lower() or "domain controllers" in group_name.lower():
+            chip_class += " admin-group"
+        elif "user" in group_name.lower():
+            chip_class += " user-group"
+        else:
+            chip_class += " other-group"
+            
+        chips_html += f'<span class="{chip_class}" title="{group_name}">{group_name}</span>'
+    
+    chips_html += '</div>'
+    return chips_html
+   
 def render_entry(entry: dict, index: int) -> str:
     """
     Renders a single LDAP entry as HTML for the detail view
@@ -143,9 +256,20 @@ def render_entry(entry: dict, index: int) -> str:
     dn = entry.get("dn", "")
 
     display_name = extract_display_name(attributes, dn)
-        
+    
+    # Extract and format groups
+    memberof_values = attributes.get("memberOf", [])
+    group_names = extract_group_names(memberof_values, attributes)
+    groups_chips_html = format_groups_chips_html(group_names)
+
     # Create collapsible entry header with toggle functionality
-    html = f'<div class="entry">\n<h2 onclick="toggle(\'attr{index}\')">{display_name}</h2>\n<div class="attributes" id="attr{index}">'
+    html = f'''<div class="entry">
+<div class="entry-header" onclick="toggle('attr{index}')">
+    <h2>{display_name}</h2>
+    {groups_chips_html}
+</div>
+<div class="attributes" id="attr{index}">'''
+
 
     # Build attributes table
     html += '<table class="attr-table">'
@@ -164,23 +288,6 @@ def render_entry(entry: dict, index: int) -> str:
         html += f'<tr><td class="key">{key}</td><td class="value">{val}</td></tr>\n'
     html += "</table>\n</div>\n</div>\n"
     return html
-
-
-def gather_all_keys(data: list) -> list:
-    """
-    Collects all unique attribute keys from all LDAP entries
-    
-    Args:
-        data (list): List of LDAP entry dictionaries
-        
-    Returns:
-        list: Sorted list of all unique attribute names found across all entries
-    """
-    keys = set()
-    for entry in data:
-        attributes = entry.get("attributes", {})
-        keys.update(attributes.keys())
-    return sorted(keys)
 
 def render_table(data: list, keys: list) -> str:
     """
