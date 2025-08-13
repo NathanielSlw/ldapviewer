@@ -231,8 +231,10 @@ def format_groups_chips_html(group_names):
         chip_class = "group-chip"
         if "admin" in group_name.lower() or "domain controllers" in group_name.lower():
             chip_class += " admin-group"
-        elif "user" in group_name.lower():
+        elif group_name == "Users" or group_name == "Domain Users":
             chip_class += " user-group"
+        elif group_name == "Remote Management Users" or group_name == "Remote Desktop Users":
+            chip_class += " remote-group"
         else:
             chip_class += " other-group"
             
