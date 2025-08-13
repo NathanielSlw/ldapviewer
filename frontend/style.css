@@ -513,6 +513,12 @@ button:hover {
     border-color: #93c5fd;
 }
 
+.group-chip.remote-group {
+    background-color: #fef3c7;
+    color: #d97706;
+    border-color: #fcd34d;
+}
+
 .group-chip.other-group {
     background-color: #f3f4f6;
     color: #6b7280;
@@ -530,6 +536,12 @@ button:hover {
     background-color: #1e3a8a;
     color: #93c5fd;
     border-color: #2563eb;
+}
+
+[data-theme="dark"] .group-chip.remote-group {
+    background-color: #92400e;
+    color: #fcd34d;
+    border-color: #d97706;
 }
 
 [data-theme="dark"] .group-chip.other-group {
