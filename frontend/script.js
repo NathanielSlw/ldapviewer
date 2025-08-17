@@ -91,12 +91,16 @@ function toggleAll(expand) {
 function updateDetailButtons() {
     const expandBtn = document.getElementById('expandBtn');
     const collapseBtn = document.getElementById('collapseBtn');
+    const groupByBtn = document.getElementById('groupByBtn');
+    
     if (currentView === 'detail') {
         expandBtn.style.display = '';
         collapseBtn.style.display = '';
+        groupByBtn.style.display = '';
     } else {
         expandBtn.style.display = 'none';
         collapseBtn.style.display = 'none';
+        groupByBtn.style.display = 'none';
     }
 }
 
@@ -235,51 +239,121 @@ function applyAllFilters() {
  * Apply all filters to detail view entries
  */
 function applyFiltersToDetailView() {
-    const entries = document.getElementsByClassName('entry');
+    let entries;
     
-    for (let entry of entries) {
-        let shouldShow = true;
+    if (isGroupedByGroups) {
+        // In grouped view, filter entries within group sections
+        entries = document.querySelectorAll('.group-entries .entry');
         
-        // Apply search filter
-        if (filterStates.search && shouldShow) {
-            const text = entry.innerText.toLowerCase();
-            shouldShow = text.includes(filterStates.search);
-        }
-
-        // Apply RID-based filter (default/non-default)
-        if (filterStates.general.enabled && shouldShow) {
-            const objectSIDCell = Array.from(entry.getElementsByClassName('key'))
-                .find(cell => cell.textContent === 'objectSid');
-            let rid = null;
-            if (objectSIDCell) {
-                const valueCell = objectSIDCell.nextElementSibling;
-                rid = getRIDFromObjectSID(valueCell ? valueCell.textContent : "");
-            }
-            shouldShow = applyRIDFilter(rid, filterStates.general.ridFilter);
-        }
-        
-        // Apply UAC filter
-        if (filterStates.uac.enabled && shouldShow) {
-            const uacCell = Array.from(entry.getElementsByClassName('key'))
-                .find(cell => cell.textContent === 'userAccountControl');
+        // Also handle group sections visibility
+        const groupSections = document.querySelectorAll('.group-section');
+        groupSections.forEach(section => {
+            const sectionEntries = section.querySelectorAll('.entry');
+            let visibleCount = 0;
             
-            if (uacCell) {
-                const valueCell = uacCell.nextElementSibling;
-                const uacValue = valueCell ? valueCell.textContent : "";
-                shouldShow = hasUACFlags(uacValue, filterStates.uac.flags);
-            } else {
-                shouldShow = false;
+            sectionEntries.forEach(entry => {
+                let shouldShow = true;
+                
+                // Apply search filter
+                if (filterStates.search && shouldShow) {
+                    const text = entry.innerText.toLowerCase();
+                    shouldShow = text.includes(filterStates.search);
+                }
+
+                // Apply RID-based filter (default/non-default)
+                if (filterStates.general.enabled && shouldShow) {
+                    const objectSIDCell = Array.from(entry.getElementsByClassName('key'))
+                        .find(cell => cell.textContent === 'objectSid');
+                    let rid = null;
+                    if (objectSIDCell) {
+                        const valueCell = objectSIDCell.nextElementSibling;
+                        rid = getRIDFromObjectSID(valueCell ? valueCell.textContent : "");
+                    }
+                    shouldShow = applyRIDFilter(rid, filterStates.general.ridFilter);
+                }
+                
+                // Apply UAC filter
+                if (filterStates.uac.enabled && shouldShow) {
+                    const uacCell = Array.from(entry.getElementsByClassName('key'))
+                        .find(cell => cell.textContent === 'userAccountControl');
+                    
+                    if (uacCell) {
+                        const valueCell = uacCell.nextElementSibling;
+                        const uacValue = valueCell ? valueCell.textContent : "";
+                        shouldShow = hasUACFlags(uacValue, filterStates.uac.flags);
+                    } else {
+                        shouldShow = false;
+                    }
+                }
+                
+                // Apply LDAP attributes filter
+                if (filterStates.ldapAttributes.enabled && shouldShow) {
+                    shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => 
+                        hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value)
+                    );
+                }
+                
+                entry.style.display = shouldShow ? "" : "none";
+                if (shouldShow) visibleCount++;
+            });
+            
+            // Hide group section if no visible entries
+            section.style.display = visibleCount > 0 ? '' : 'none';
+            
+            // Update group count
+            const countSpan = section.querySelector('.group-count');
+            if (countSpan) {
+                countSpan.textContent = `${visibleCount} user${visibleCount !== 1 ? 's' : ''}`;
             }
-        }
+        });
+    } else {
+        // Normal view
+        entries = document.getElementsByClassName('entry');
         
-        // Apply LDAP attributes filter
-        if (filterStates.ldapAttributes.enabled && shouldShow) {
-            shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => 
-                hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value)
-            );
+        for (let entry of entries) {
+            let shouldShow = true;
+            
+            // Apply search filter
+            if (filterStates.search && shouldShow) {
+                const text = entry.innerText.toLowerCase();
+                shouldShow = text.includes(filterStates.search);
+            }
+
+            // Apply RID-based filter (default/non-default)
+            if (filterStates.general.enabled && shouldShow) {
+                const objectSIDCell = Array.from(entry.getElementsByClassName('key'))
+                    .find(cell => cell.textContent === 'objectSid');
+                let rid = null;
+                if (objectSIDCell) {
+                    const valueCell = objectSIDCell.nextElementSibling;
+                    rid = getRIDFromObjectSID(valueCell ? valueCell.textContent : "");
+                }
+                shouldShow = applyRIDFilter(rid, filterStates.general.ridFilter);
+            }
+            
+            // Apply UAC filter
+            if (filterStates.uac.enabled && shouldShow) {
+                const uacCell = Array.from(entry.getElementsByClassName('key'))
+                    .find(cell => cell.textContent === 'userAccountControl');
+                
+                if (uacCell) {
+                    const valueCell = uacCell.nextElementSibling;
+                    const uacValue = valueCell ? valueCell.textContent : "";
+                    shouldShow = hasUACFlags(uacValue, filterStates.uac.flags);
+                } else {
+                    shouldShow = false;
+                }
+            }
+            
+            // Apply LDAP attributes filter
+            if (filterStates.ldapAttributes.enabled && shouldShow) {
+                shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => 
+                    hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value)
+                );
+            }
+            
+            entry.style.display = shouldShow ? "" : "none";
         }
-        
-        entry.style.display = shouldShow ? "" : "none";
     }
 }
 
@@ -361,9 +435,37 @@ function filterEntries() {
 function updateResultsCount() {
     let total = 0, visibles = 0;
     if (currentView === 'detail') {
-        const entries = document.getElementsByClassName('entry');
-        total = entries.length;
-        visibles = Array.from(entries).filter(e => e.style.display !== 'none').length;
+        if (isGroupedByGroups) {
+            // Count unique users in grouped view
+            const uniqueUsers = new Set();
+            const entries = document.querySelectorAll('.group-entries .entry');
+            
+            entries.forEach(entry => {
+                const h2Element = entry.querySelector('h2');
+                const displayName = h2Element ? h2Element.textContent.trim() : 'Unknown';
+                uniqueUsers.add(displayName);
+                
+                if (entry.style.display !== 'none') {
+                    // Don't add to visibles here - we'll count unique visible users
+                }
+            });
+            
+            const visibleUniqueUsers = new Set();
+            entries.forEach(entry => {
+                if (entry.style.display !== 'none') {
+                    const h2Element = entry.querySelector('h2');
+                    const displayName = h2Element ? h2Element.textContent.trim() : 'Unknown';
+                    visibleUniqueUsers.add(displayName);
+                }
+            });
+            
+            total = uniqueUsers.size;
+            visibles = visibleUniqueUsers.size;
+        } else {
+            const entries = document.getElementsByClassName('entry');
+            total = entries.length;
+            visibles = Array.from(entries).filter(e => e.style.display !== 'none').length;
+        }
     } else {
         const rows = document.querySelectorAll("#tableView tbody tr");
         total = rows.length;
@@ -601,6 +703,286 @@ function exportCSV() {
     a.download = 'ldap_dump_export.csv';
     a.click();
     URL.revokeObjectURL(url);
+}
+
+// ============================================================================
+// GROUP BY FUNCTIONALITY
+// ============================================================================
+
+let isGroupedByGroups = false;
+let originalEntries = []; // Store original entries
+
+/**
+ * Toggle group by groups view
+ */
+function toggleUsersByGroups() {
+    isGroupedByGroups = !isGroupedByGroups;
+    const button = document.getElementById('groupByBtn');
+    
+    if (isGroupedByGroups) {
+        // Store original entries before grouping
+        storeOriginalEntries();
+        applyGroupByGroups();
+        button.textContent = '📋 Ungroup';
+        button.classList.add('active');
+    } else {
+        removeGroupByGroups();
+        button.textContent = '👥 Users by Group';
+        button.classList.remove('active');
+    }
+}
+
+/**
+ * Store original entries before grouping
+ */
+function storeOriginalEntries() {
+    const detailView = document.getElementById('detailView');
+    originalEntries = Array.from(detailView.getElementsByClassName('entry')).map(entry => entry.cloneNode(true));
+}
+
+/**
+ * Toggle collapse/expand for a group section
+ */
+function toggleGroupSection(headerElem) {
+    const section = headerElem.parentElement;
+    const entries = section.querySelector('.group-entries');
+    if (!entries) return;
+    const isCollapsed = entries.style.display === 'none';
+    entries.style.display = isCollapsed ? '' : 'none';
+    headerElem.classList.toggle('collapsed', !isCollapsed);
+}
+
+// Ajoute l'event listener après avoir créé les groupes
+function enableGroupCollapse() {
+    document.querySelectorAll('.group-header').forEach(header => {
+        header.onclick = function(e) {
+            // Évite de collapse si on clique sur un bouton à l'intérieur du header
+            if (e.target.closest('button')) return;
+            toggleGroupSection(header);
+        };
+    });
+}
+
+/**
+ * Apply group by groups organization
+ */
+function applyGroupByGroups() {
+    const detailView = document.getElementById('detailView');
+    const entries = Array.from(document.getElementsByClassName('entry'));
+    
+    // Extract user data with their groups
+    const usersData = entries.map(entry => {
+        const userData = extractUserGroups(entry);
+        userData.element = entry;
+        return userData;
+    });
+    
+    // Create grouped structure
+    const groupedUsers = createGroupedStructure(usersData);
+    
+    // Clear detail view and rebuild with groups
+    detailView.innerHTML = '';
+    
+    // Add ungrouped users first if any
+    if (groupedUsers.ungrouped.length > 0) {
+        const ungroupedSection = createGroupSection('📝 No Groups', groupedUsers.ungrouped);
+        detailView.appendChild(ungroupedSection);
+    }
+    
+    // Add grouped users
+    Object.keys(groupedUsers.groups).sort().forEach(groupName => {
+        const groupSection = createGroupSection(groupName, groupedUsers.groups[groupName]);
+        detailView.appendChild(groupSection);
+    });
+    
+    // Re-apply filters
+    applyAllFilters();
+
+    // Enable collapse/expand on group headers
+    enableGroupCollapse();
+}
+
+/**
+ * Remove group by groups organization (restore original view)
+ */
+function removeGroupByGroups() {
+    const detailView = document.getElementById('detailView');
+    
+    // Clear and restore original entries
+    detailView.innerHTML = '';
+    
+    originalEntries.forEach(entry => {
+        // Clean up any group-specific classes
+        entry.classList.remove('grouped-entry');
+        detailView.appendChild(entry);
+    });
+    
+    // Re-apply filters
+    applyAllFilters();
+}
+
+
+/**
+ * Extract user groups from entry element (same logic as extract_group_names in Python)
+ */
+function extractUserGroups(entryElement) {
+    const groupNames = [];
+    
+    // Extract groups from memberOf attribute
+    const memberOfCell = Array.from(entryElement.getElementsByClassName('key'))
+        .find(cell => cell.textContent === 'memberOf');
+    
+    if (memberOfCell) {
+        const valueCell = memberOfCell.nextElementSibling;
+        if (valueCell && valueCell.textContent.trim()) {
+            // Split by comma and process each memberOf entry
+            const memberOfValues = valueCell.textContent.split(',').map(s => s.trim());
+            
+            memberOfValues.forEach(memberOfEntry => {
+                if (memberOfEntry) {
+                    // Split by comma and take the first part
+                    const firstPart = memberOfEntry.split(',')[0].trim();
+                    
+                    if (firstPart.toUpperCase().startsWith('CN=')) {
+                        // Extract group name after "CN="
+                        const groupName = firstPart.substring(3).trim(); // Remove "CN=" prefix
+                        
+                        // Skip "Users" and "Builtin" groups
+                        if (groupName && 
+                            groupName !== "Users" && 
+                            groupName !== "Builtin" && 
+                            !groupNames.includes(groupName)) {
+                            groupNames.push(groupName);
+                        }
+                    }
+                }
+            });
+        }
+    }
+    
+    // Primary group ID to name mapping (same as Python)
+    const PRIMARY_GROUP_MAPPING = {
+        512: "Domain Admins",
+        513: "Domain Users", 
+        514: "Domain Guests",
+        515: "Domain Computers",
+        516: "Domain Controllers",
+        517: "Cert Publishers",
+        518: "Schema Admins",
+        519: "Enterprise Admins",
+        520: "Group Policy Creator Owners",
+        521: "Read-only Domain Controllers",
+        522: "Cloneable Domain Controllers",
+        525: "Protected Users",
+        526: "Key Admins",
+        527: "Enterprise Key Admins"
+    };
+    
+    // Add primary group (usually "Domain Users" for standard users)
+    // The primary group is determined by primaryGroupID attribute
+    const primaryGroupCell = Array.from(entryElement.getElementsByClassName('key'))
+        .find(cell => cell.textContent === 'primaryGroupID');
+    
+    if (primaryGroupCell) {
+        const valueCell = primaryGroupCell.nextElementSibling;
+        if (valueCell && valueCell.textContent.trim()) {
+            try {
+                const groupId = parseInt(valueCell.textContent.trim(), 10);
+                const primaryGroupName = PRIMARY_GROUP_MAPPING[groupId] || `Primary Group (${groupId})`;
+                
+                // Skip "Users" and "Builtin" groups, add primary group if not already in the list
+                if (primaryGroupName !== "Users" && 
+                    primaryGroupName !== "Builtin" && 
+                    !groupNames.includes(primaryGroupName)) {
+                    groupNames.push(primaryGroupName);
+                }
+            } catch (e) {
+                console.warn(`Invalid primaryGroupID value: ${valueCell.textContent.trim()}`);
+            }
+        }
+    }
+    
+    // Get user display name
+    const h2Element = entryElement.querySelector('h2');
+    const displayName = h2Element ? h2Element.textContent.trim() : 'Unknown User';
+    
+    return {
+        displayName: displayName,
+        groups: groupNames,
+        element: entryElement
+    };
+}
+
+/**
+ * Create grouped structure from users data
+ */
+function createGroupedStructure(usersData) {
+    const result = {
+        groups: {},
+        ungrouped: []
+    };
+    
+    usersData.forEach(userData => {
+        if (userData.groups.length === 0) {
+            result.ungrouped.push(userData);
+        } else {
+            userData.groups.forEach(groupName => {
+                if (!result.groups[groupName]) {
+                    result.groups[groupName] = [];
+                }
+                // Avoid duplicates in the same group
+                if (!result.groups[groupName].find(u => u.displayName === userData.displayName)) {
+                    result.groups[groupName].push(userData);
+                }
+            });
+        }
+    });
+    
+    return result;
+}
+
+/**
+ * Create a group section with title and users
+ */
+function createGroupSection(groupName, users) {
+    const section = document.createElement('div');
+    section.className = 'group-section';
+    
+    // Group header
+    const header = document.createElement('div');
+    header.className = 'group-header';
+    header.innerHTML = `
+        <h3 class="group-title">${groupName}</h3>
+        <span class="group-count">${users.length} user${users.length !== 1 ? 's' : ''}</span>
+    `;
+    section.appendChild(header);
+    
+    // Group container for entries
+    const container = document.createElement('div');
+    container.className = 'group-entries';
+    
+    users.forEach((userData, index) => {
+        const entryClone = userData.element.cloneNode(true);
+        entryClone.classList.add('grouped-entry');
+        
+        // Generate unique IDs for this group section to avoid conflicts
+        const uniqueId = `${groupName.replace(/\s+/g, '_')}_${index}`;
+        const attributesDiv = entryClone.querySelector('.attributes');
+        if (attributesDiv) {
+            attributesDiv.id = `attr_${uniqueId}`;
+        }
+        
+        // Update onclick handler to use new unique ID
+        const headerDiv = entryClone.querySelector('.entry-header');
+        if (headerDiv) {
+            headerDiv.setAttribute('onclick', `toggle('attr_${uniqueId}')`);
+        }
+        
+        container.appendChild(entryClone);
+    });
+    
+    section.appendChild(container);
+    return section;
 }
 
 // ============================================================================

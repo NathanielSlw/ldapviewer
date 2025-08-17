@@ -340,6 +340,25 @@ def render_table(data: list, keys: list) -> str:
 # ============================================================================
 # Core function that orchestrates the HTML generation process
 
+def is_users_file(input_file, data):
+    """
+    Determine if the file contains user objects
+    
+    Args:
+        input_file (str): Path to the input file
+        data (list): LDAP data entries
+        
+    Returns:
+        bool: True if file contains users, False otherwise
+    """
+    # Check filename first
+    filename = os.path.basename(input_file).lower()
+    if 'users' in filename:
+        return True
+    else:
+        return False
+
+
 def main(input_file):
     """
     Main function that processes a JSON LDAP dump and generates an HTML viewer
@@ -358,8 +377,20 @@ def main(input_file):
     script_file = os.path.join(frontend_dir, "script.js")
     
     # Load and parse the LDAP JSON data
-    with open(input_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(input_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"[!] Error: Invalid JSON in file '{input_file}': {e}")
+        return
+    except Exception as e:
+        print(f"[!] Error reading file '{input_file}': {e}")
+        return
+
+    print(f"Processing {len(data)} entries from '{input_file}'")
+    
+    # Check if this is a users file
+    is_users = is_users_file(input_file, data)
 
     # Generate HTML content for detail view
     detail_html = ""
@@ -378,6 +409,11 @@ def main(input_file):
     with open(script_file, "r", encoding="utf-8") as f:
         script_content = f.read()
 
+    # Conditionally show/hide the group by button based on file type
+    if not is_users:
+        # Hide the group by button for non-user files
+        style_content += "\n#groupByBtn { display: none !important; }"
+
     # Combine template with generated content and inline assets
     full_html = template.format(
         detail_content=detail_html,
@@ -387,7 +423,7 @@ def main(input_file):
         script_content=script_content
     )
 
-    # # Write the complete HTML file
+    # Write the complete HTML file
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(full_html)
 
@@ -405,7 +441,7 @@ logo_ascii = r"""
 
 if __name__ == "__main__":
     print(logo_ascii)
-    print("LDAPViewer v2.5 - by NathanielSlw\n")
+    print("LDAPViewer v2.6 - by NathanielSlw\n")
     
     parser = argparse.ArgumentParser(
         description='Generates an interactive HTML interface to explore ldapdomaindump JSON files.',
