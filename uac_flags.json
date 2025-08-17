@@ -54,6 +54,11 @@
         "severity": "info",
         "description": "It's a computer account for a computer that is running Microsoft Windows NT 4.0 Workstation, NT 4.0 Server, 2000 PRO or 2000 server and is a member of this domain"
     },
+    "0x1020": {
+        "name": "PRE_CREATED_COMPUTER_ACCOUNT",
+        "severity": "critical",
+        "description": "Pre-created computer account (i.e. manually created, not auto-joined). Password = lowercase computer name without the trailing $. (PASSWD_NOTREQD + WORKSTATION_TRUST_ACCOUNT)."
+    },
     "0x2000": {
         "name": "SERVER_TRUST_ACCOUNT",
         "severity": "info",
