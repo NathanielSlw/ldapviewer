@@ -48,6 +48,19 @@ def load_uac_flags():
 # Load UAC flags from JSON file or use defaults
 UAC_FLAGS = load_uac_flags()
 
+def get_combined_uac_flags(uac_value, uac_flags):
+    """
+    Returns a list of combined UAC flags that should be set based on the value.
+    """
+    combined_flags = []
+    # PRE_CREATED_COMPUTER_ACCOUNT: PASSWD_NOTREQD (0x20) + WORKSTATION_TRUST_ACCOUNT (0x1000)
+    if (uac_value & 0x20) and (uac_value & 0x1000):
+        pre_created_flag = uac_flags.get(0x1020)
+        if pre_created_flag:
+            combined_flags.append(pre_created_flag)
+    
+    return combined_flags
+
 def decode_uac_flags(uac_value):
     """
     Decode UAC flags from integer value
@@ -66,9 +79,14 @@ def decode_uac_flags(uac_value):
     
     active_flags = []
     for flag_value, flag_info in UAC_FLAGS.items():
+        # Skip combined flags, handled separately
+        if flag_info["name"] == "PRE_CREATED_COMPUTER_ACCOUNT":
+            continue
         if uac_value & flag_value:
             active_flags.append(flag_info)
-    
+
+    # Add combined flags
+    active_flags.extend(get_combined_uac_flags(uac_value, UAC_FLAGS))
     return active_flags
 
 def format_uac_display_html(uac_value, flags):
@@ -207,6 +225,13 @@ def gather_all_keys(data: list) -> list:
         keys.update(attributes.keys())
     return sorted(keys)
 
+def is_kerberoastable(attributes):
+    """
+    Returns True if the user is kerberoastable (has servicePrincipalName).
+    """
+    spn_values = attributes.get("servicePrincipalName", [])
+    return bool(spn_values)
+
 # ============================================================================
 # HTML RENDERING FUNCTIONS
 # ============================================================================
@@ -259,6 +284,16 @@ def render_entry(entry: dict, index: int) -> str:
 
     display_name = extract_display_name(attributes, dn)
     
+    # Check if user is kerberoastable (has servicePrincipalName)
+    kerberoastable = is_kerberoastable(attributes)
+
+    # SPN icon HTML (can be styled via CSS)
+    spn_chip_html = ''
+    if kerberoastable:
+        # spn_chip_html = '<span class="group-chip spn-chip" title="Kerberoastable: Has SPN">🎯 Kerberoastable</span>'
+        # spn_chip_html = '<span class="" title="Kerberoastable: Has SPN">🎯</span>'
+        spn_chip_html = '<span class="spn-chip" title="Kerberoastable: Has SPN">🎯</span>'
+
     # Extract and format groups
     memberof_values = attributes.get("memberOf", [])
     group_names = extract_group_names(memberof_values, attributes)
@@ -267,15 +302,25 @@ def render_entry(entry: dict, index: int) -> str:
     # Create collapsible entry header with toggle functionality
     html = f'''<div class="entry">
 <div class="entry-header" onclick="toggle('attr{index}')">
-    <h2>{display_name}</h2>
+    <h2>{display_name} {spn_chip_html}</h2>
     {groups_chips_html}
 </div>
 <div class="attributes" id="attr{index}">'''
 
+    # Define minimal columns (same as ldapdomaindump)
+    minimal_columns = {
+        'cn', 'sAMAccountName', 'whenCreated', 'whenChanged', 'lastLogon', 
+        'userAccountControl', 'pwdLastSet', 'objectSid', 'memberOf','description', 'servicePrincipalName',
+        'dNSHostName', 'operatingSystem', 'operatingSystemVersion', 'operatingSystemServicePack',
+        'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType'
+    }
 
     # Build attributes table
     html += '<table class="attr-table">'
     for key, values in attributes.items():
+        # Add data attribute to identify minimal columns
+        row_class = 'minimal-column' if key in minimal_columns else 'extended-column'
+        
         val = ', '.join(map(str, values))
 
         # Special handling for userAccountControl
@@ -287,7 +332,7 @@ def render_entry(entry: dict, index: int) -> str:
             except (ValueError, TypeError):
                 pass
 
-        html += f'<tr><td class="key">{key}</td><td class="value">{val}</td></tr>\n'
+        html += f'<tr class="{row_class}"><td class="key">{key}</td><td class="value">{val}</td></tr>\n'
     html += "</table>\n</div>\n</div>\n"
     return html
 
@@ -302,10 +347,20 @@ def render_table(data: list, keys: list) -> str:
     Returns:
         str: HTML string representing a complete table with headers and data
     """
+    # Define minimal columns (same as ldapdomaindump)
+    minimal_columns = {
+        'cn', 'sAMAccountName', 'whenCreated', 'whenChanged', 'lastLogon', 
+        'userAccountControl', 'pwdLastSet', 'objectSid', 'memberOf','description', 'servicePrincipalName',
+        'dNSHostName', 'operatingSystem', 'operatingSystemVersion', 'operatingSystemServicePack',
+        'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType'
+    }
+
     # Build table header with DN column first, then all attribute columns
     html = "<table>\n<thead><tr><th>DN</th>"
     for k in keys:
-        html += f"<th>{k}</th>"
+        # Add data attribute to identify minimal columns
+        col_class = 'minimal-column' if k in minimal_columns else 'extended-column'
+        html += f"<th class='{col_class}'>{k}</th>"
     html += "</tr></thead>\n<tbody>\n"
 
     # Process each LDAP entry as a table row
@@ -318,6 +373,9 @@ def render_table(data: list, keys: list) -> str:
 
         # Add cell for each attribute column
         for k in keys:
+            # Add data attribute to identify minimal columns
+            col_class = 'minimal-column' if k in minimal_columns else 'extended-column'
+            
             values = attributes.get(k, [])
             val = ', '.join(map(str, values))
 
@@ -330,7 +388,7 @@ def render_table(data: list, keys: list) -> str:
                 except (ValueError, TypeError):
                     pass
 
-            html += f"<td>{val}</td>"
+            html += f"<td class='{col_class}'>{val}</td>"
         html += "</tr>\n"
     html += "</tbody>\n</table>\n"
     return html
@@ -340,7 +398,7 @@ def render_table(data: list, keys: list) -> str:
 # ============================================================================
 # Core function that orchestrates the HTML generation process
 
-def is_users_file(input_file, data):
+def is_users_file(input_file):
     """
     Determine if the file contains user objects
     
@@ -357,7 +415,6 @@ def is_users_file(input_file, data):
         return True
     else:
         return False
-
 
 def main(input_file):
     """
@@ -390,7 +447,7 @@ def main(input_file):
     print(f"Processing {len(data)} entries from '{input_file}'")
     
     # Check if this is a users file
-    is_users = is_users_file(input_file, data)
+    is_users = is_users_file(input_file)
 
     # Generate HTML content for detail view
     detail_html = ""
