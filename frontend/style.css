@@ -144,10 +144,10 @@ h1 {
 }
 
 /* =============================================================================
-   THEME TOGGLE BUTTON
+   TOGGLE BUTTONS (COMMON STYLES) - THEME & MINIMAL VIEW
    ============================================================================= */
 
-.theme-toggle {
+.toggle-button {
     position: relative;
     background: var(--bg-secondary);
     border: 2px solid var(--border-light);
@@ -160,15 +160,14 @@ h1 {
     padding: 4px;
     box-shadow: 0 2px 8px var(--shadow-light);
     transition: all 0.3s ease;
-    margin-left: auto;
 }
 
-.theme-toggle:hover {
+.toggle-button:hover {
     box-shadow: 0 4px 12px var(--shadow-medium);
     border-color: var(--accent-primary);
 }
 
-.theme-toggle-slider {
+.toggle-slider {
     position: absolute;
     width: 30px;
     height: 30px;
@@ -183,27 +182,37 @@ h1 {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.theme-toggle-slider.dark {
+.toggle-slider.active {
     transform: translateX(38px);
     background: var(--accent-secondary);
 }
 
-.theme-toggle .sun-icon {
+.toggle-icon {
     position: absolute;
+    font-size: 16px;
+    color: var(--text-muted);
+    transition: color 0.3s ease;
+}
+
+.toggle-icon.left {
     left: 8px;
-    font-size: 16px;
-    color: var(--text-muted);
-    transition: color 0.3s ease;
 }
 
-.theme-toggle .moon-icon {
-    position: absolute;
+.toggle-icon.right {
     right: 8px;
-    font-size: 16px;
-    color: var(--text-muted);
-    transition: color 0.3s ease;
 }
 
+.toggle-buttons-group {
+    display: flex;
+    align-items: center;
+    gap: 0px; /* Espacement réduit entre les toggles */
+}
+
+/* =============================================================================
+   THEME TOGGLE SPECIFIC
+   ============================================================================= */
+
+/* Theme icon states */
 [data-theme="dark"] .theme-toggle .moon-icon {
     color: var(--accent-primary);
 }
@@ -211,6 +220,20 @@ h1 {
 [data-theme="light"] .theme-toggle .sun-icon {
     color: var(--accent-primary);
 }
+
+/* =============================================================================
+   VIEW TOGGLE SPECIFIC  
+   ============================================================================= */
+
+/* View icon states */
+.view-toggle:not(.minimal) .full-icon {
+    color: var(--accent-primary);
+}
+
+.view-toggle.minimal .minimal-icon {
+    color: var(--accent-primary);
+}
+
 
 /* =============================================================================
    HEADER LAYOUT
@@ -233,6 +256,7 @@ h1 {
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-left: auto;
 }
 
 /* GitHub Link */
@@ -378,27 +402,101 @@ h1 {
    SEARCH INPUT
    ============================================================================= */
 
+.search-container {
+    position: relative;
+    margin-bottom: 20px;
+}
+
 input[type="text"] {
     width: 100%;
-    padding: 14px 16px;
+    padding: 14px 50px 14px 50px;
     font-size: 16px;
-    border-radius: 8px;
+    border-radius: 16px;
     border: 2px solid var(--border-light);
     box-sizing: border-box;
-    margin-bottom: 20px;
-    transition: border-color 0.2s ease;
+    transition: all 0.2s ease;
     background: var(--bg-secondary);
     color: var(--text-primary);
+    box-shadow: 0 2px 8px var(--shadow-light);
 }
 
 input[type="text"]:focus {
     outline: none;
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.1);
+    box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.1), 0 4px 12px var(--shadow-medium);
+    transform: translateY(-1px);
 }
 
 input[type="text"]::placeholder {
     color: var(--text-muted);
+    font-style: normal;
+    font-weight: 400;
+    opacity: 0.7;
+}
+
+.search-icon {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: 18px;
+    pointer-events: none;
+    transition: color 0.2s ease;
+    margin-top: -2px;
+}
+
+input[type="text"]:focus + .search-icon {
+    color: var(--accent-primary);
+}
+
+.clear-search {
+    position: absolute;
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--text-muted);
+    color: var(--bg-secondary);
+    border: none;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    margin: 0;
+    padding: 0;
+    line-height: 1;
+}
+
+.clear-search:hover {
+    background: var(--accent-primary);
+    transform: translateY(-50%) scale(1.1);
+    box-shadow: 0 2px 6px rgba(74, 158, 255, 0.3);
+}
+
+.clear-search.show {
+    display: flex;
+}
+
+/* Animation for the clear button */
+@keyframes fadeInScale {
+    from {
+        opacity: 0;
+        transform: translateY(-50%) scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(-50%) scale(1);
+    }
+}
+
+.clear-search.show {
+    animation: fadeInScale 0.2s ease;
 }
 
 /* =============================================================================
@@ -485,6 +583,13 @@ button:hover {
 .value {
     color: var(--text-primary);
 }
+
+.spn-chip {
+    margin-left: -4px;
+    font-size: 1em;
+    vertical-align: middle;
+}
+
 
 /* =============================================================================
    Entry Header + Groups Chips
@@ -1180,3 +1285,19 @@ tr:hover {
 .grouped-entry {
     position: relative;
 }
+
+/* =============================================================================
+   MINIMAL VIEW STYLES
+   ============================================================================= */
+
+/* Hide extended columns in minimal view */
+body.minimal-view .extended-column {
+    display: none !important;
+}
+
+body.minimal-view th.extended-column,
+body.minimal-view td.extended-column,
+body.minimal-view tr.extended-column {
+    display: none !important;
+}
+

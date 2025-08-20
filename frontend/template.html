@@ -21,13 +21,24 @@
                 </svg>
                 
             </a>
-            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
-                <span class="sun-icon">🔆</span>
-                <span class="moon-icon">🌙​</span>
-                <div class="theme-toggle-slider">
+            <div class="toggle-buttons-group">
+                <button class="toggle-button view-toggle" onclick="toggleMinimalView()" title="Toggle minimal view - Show only essential columns">
+                
+                <span class="toggle-icon left full-icon">➕</span>
+                <span class="toggle-icon right minimal-icon">➖</span>
+                <div class="toggle-slider">
+                    <span class="slider-icon-minimal">➕</span>
+                </div>
+            </button>
+
+            <button class="toggle-button theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                <span class="toggle-icon left sun-icon">🔆</span>
+                <span class="toggle-icon right moon-icon">🌙​</span>
+                <div class="toggle-slider">
                     <span class="slider-icon">🔆</span>
                 </div>
             </button>
+            </div>
         </div>
     </div>
 
@@ -52,8 +63,13 @@
             <button id="groupByBtn" onclick="toggleUsersByGroups()">👥 Users by Group</button>
         </div>
         
-        <!-- Barre de recherche -->
-        <input type="text" id="searchInput" onkeyup="filterEntries()" placeholder="🔍 Search LDAP object : username, email, etc." autofocus>
+        <!-- Search bar -->
+         <div class="search-container">
+            <input type="text" id="searchInput" onkeyup="filterEntries()" oninput="toggleClearButton()" placeholder="Search LDAP object : username, email, etc." autofocus>
+            <span class="search-icon">🔍</span>
+            <button class="clear-search" id="clearSearchBtn" onclick="clearSearch()" title="Clear search">×</button>
+        </div>
+        <!-- <input type="text" id="searchInput" onkeyup="filterEntries()" placeholder="🔍 Search LDAP object : username, email, etc." autofocus> -->
 
         <!-- Filter Sections -->
         <div class="filter-bar">

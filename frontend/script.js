@@ -38,14 +38,14 @@ function toggleTheme() {
  * Update the visual state of the toggle switch
  */
 function updateToggleSwitch(theme) {
-    const slider = document.querySelector('.theme-toggle-slider');
-    const sliderIcon = document.querySelector('.slider-icon');
+    const slider = document.querySelector('.theme-toggle .toggle-slider');
+    const sliderIcon = document.querySelector('.theme-toggle .slider-icon');
     
     if (theme === 'dark') {
-        slider.classList.add('dark');
+        slider.classList.add('active');
         sliderIcon.textContent = '🌙​';
     } else {
-        slider.classList.remove('dark');
+        slider.classList.remove('active');
         sliderIcon.textContent = '🔆';
     }
 }
@@ -145,6 +145,40 @@ function switchView(view) {
     
     // Re-apply all filters when switching views
     applyAllFilters();
+}
+
+// =============================================================================
+// MINIMAL VIEW TOGGLE
+// =============================================================================
+
+function toggleMinimalView() {
+    const body = document.body;
+    const viewToggle = document.querySelector('.view-toggle');
+    
+    body.classList.toggle('minimal-view');
+    viewToggle.classList.toggle('minimal');
+    
+    const isMinimal = body.classList.contains('minimal-view');
+    
+    // Update the toggle slider icon
+    updateMinimalViewToggle(isMinimal);
+}
+
+function updateMinimalViewToggle(isMinimal) {
+    const slider = document.querySelector('.view-toggle .toggle-slider');
+    const sliderIcon = document.querySelector('.view-toggle .slider-icon-minimal');
+    const button = document.querySelector('.view-toggle');
+    
+    if (isMinimal) {
+        slider.classList.add('active'); // Slide to the right
+        sliderIcon.textContent = '➖'; // Show minimal icon
+        button.setAttribute('title', 'Toggle full view - Show all columns');
+    } else {
+        slider.classList.remove('active'); // Default position to the left
+        sliderIcon.textContent = '➕'; // Show full icon (default)
+        button.setAttribute('title', 'Toggle minimal view - Show only essential columns');
+
+    }
 }
 
 // ============================================================================
@@ -254,10 +288,10 @@ function applyFiltersToDetailView() {
             sectionEntries.forEach(entry => {
                 let shouldShow = true;
                 
-                // Apply search filter
+                // Apply search filter with improved text extraction
                 if (filterStates.search && shouldShow) {
-                    const text = entry.innerText.toLowerCase();
-                    shouldShow = text.includes(filterStates.search);
+                    const searchableText = getSearchableText(entry);
+                    shouldShow = searchableText.includes(filterStates.search);
                 }
 
                 // Apply RID-based filter (default/non-default)
@@ -279,7 +313,9 @@ function applyFiltersToDetailView() {
                     
                     if (uacCell) {
                         const valueCell = uacCell.nextElementSibling;
-                        const uacValue = valueCell ? valueCell.textContent : "";
+                        // Handle both formatted UAC and raw values
+                        const uacContainer = valueCell.querySelector('.uac-value');
+                        const uacValue = uacContainer ? uacContainer.textContent : valueCell.textContent;
                         shouldShow = hasUACFlags(uacValue, filterStates.uac.flags);
                     } else {
                         shouldShow = false;
@@ -313,10 +349,10 @@ function applyFiltersToDetailView() {
         for (let entry of entries) {
             let shouldShow = true;
             
-            // Apply search filter
+            // Apply search filter with improved text extraction
             if (filterStates.search && shouldShow) {
-                const text = entry.innerText.toLowerCase();
-                shouldShow = text.includes(filterStates.search);
+                const searchableText = getSearchableText(entry);
+                shouldShow = searchableText.includes(filterStates.search);
             }
 
             // Apply RID-based filter (default/non-default)
@@ -338,7 +374,9 @@ function applyFiltersToDetailView() {
                 
                 if (uacCell) {
                     const valueCell = uacCell.nextElementSibling;
-                    const uacValue = valueCell ? valueCell.textContent : "";
+                    // Handle both formatted UAC and raw values
+                    const uacContainer = valueCell.querySelector('.uac-value');
+                    const uacValue = uacContainer ? uacContainer.textContent : valueCell.textContent;
                     shouldShow = hasUACFlags(uacValue, filterStates.uac.flags);
                 } else {
                     shouldShow = false;
@@ -371,10 +409,28 @@ function applyFiltersToTableView() {
     rows.forEach(row => {
         let shouldShow = true;
         
-        // Apply search filter
+        // Apply search filter with improved text extraction
         if (filterStates.search && shouldShow) {
-            const text = row.innerText.toLowerCase();
-            shouldShow = text.includes(filterStates.search);
+            let searchableText = '';
+            
+            // Get text from all cells
+            Array.from(row.cells).forEach(cell => {
+                // Handle UAC cells specially
+                if (cell.querySelector('.uac-container')) {
+                    const uacValue = cell.querySelector('.uac-value');
+                    if (uacValue) {
+                        searchableText += uacValue.textContent.trim() + ' ';
+                    }
+                    const flags = cell.querySelectorAll('.uac-flag');
+                    flags.forEach(flag => {
+                        searchableText += flag.textContent.trim() + ' ';
+                    });
+                } else {
+                    searchableText += cell.textContent.trim() + ' ';
+                }
+            });
+            
+            shouldShow = searchableText.toLowerCase().includes(filterStates.search);
         }
         
         // Apply RID-based filter (default/non-default)
@@ -391,7 +447,9 @@ function applyFiltersToTableView() {
         if (filterStates.uac.enabled && shouldShow) {
             if (uacIndex !== -1) {
                 const cell = row.cells[uacIndex];
-                const uacValue = cell ? cell.textContent : "";
+                // Handle both formatted UAC and raw values
+                const uacContainer = cell.querySelector('.uac-value');
+                const uacValue = uacContainer ? uacContainer.textContent : cell.textContent;
                 shouldShow = hasUACFlags(uacValue, filterStates.uac.flags);
             } else {
                 shouldShow = false;
@@ -421,15 +479,98 @@ function applyFiltersToTableView() {
     });
 }
 
+// Function to show/hide the clear button
+function toggleClearButton() {
+    const searchInput = document.getElementById('searchInput');
+    const clearBtn = document.getElementById('clearSearchBtn');
+    
+    if (searchInput.value.length > 0) {
+        clearBtn.classList.add('show');
+    } else {
+        clearBtn.classList.remove('show');
+    }
+}
+
+// Function to clear the search
+function clearSearch() {
+    const searchInput = document.getElementById('searchInput');
+    const clearBtn = document.getElementById('clearSearchBtn');
+    
+    searchInput.value = '';
+    clearBtn.classList.remove('show');
+    searchInput.focus();
+    
+    // Clear search state immediately and apply filters
+    filterStates.search = '';
+    clearTimeout(debounceTimer);
+    applyAllFilters();
+}
+
+/**
+ * Improved search text extraction that handles HTML content
+ */
+function getSearchableText(element) {
+    let searchText = '';
+    
+    // Get the display name from h2
+    const h2 = element.querySelector('h2');
+    if (h2) {
+        // Extract text content, removing emoji and special chars for better matching
+        searchText +=  h2.textContent.trim() + ' ';
+    }
+    
+    // Get all attribute keys and values
+    const keys = element.querySelectorAll('.key');
+    const values = element.querySelectorAll('.value');
+    
+    keys.forEach(key => {
+        searchText += key.textContent.trim() + ' ';
+    });
+    
+    values.forEach(value => {
+        // For UAC values, also include the raw numeric value
+        if (value.querySelector('.uac-container')) {
+            const uacValue = value.querySelector('.uac-value');
+            if (uacValue) {
+                searchText += uacValue.textContent.trim() + ' ';
+            }
+            // Also include flag names
+            const flags = value.querySelectorAll('.uac-flag');
+            flags.forEach(flag => {
+                searchText += flag.textContent.trim() + ' ';
+            });
+        } else {
+            searchText += value.textContent.trim() + ' ';
+        }
+    });
+    
+    // Get group chip text
+    const groupChips = element.querySelectorAll('.group-chip');
+    groupChips.forEach(chip => {
+        searchText += chip.textContent.trim() + ' ';
+    });
+    
+    return searchText.toLowerCase();
+}
+
+
 /**
  * Search filter with debouncing
  */
 function filterEntries() {
+    // Clear any existing timer
     clearTimeout(debounceTimer);
+    
+    // Get search value immediately for UI responsiveness
+    const searchValue = document.getElementById('searchInput').value.toLowerCase().trim();
+    
+    // Update filter state immediately
+    filterStates.search = searchValue;
+    
+    // Apply filters with a shorter debounce for better responsiveness
     debounceTimer = setTimeout(() => {
-        filterStates.search = document.getElementById('searchInput').value.toLowerCase();
         applyAllFilters();
-    }, 150);
+    }, 100); 
 }
 
 function updateResultsCount() {
@@ -752,7 +893,7 @@ function toggleGroupSection(headerElem) {
     headerElem.classList.toggle('collapsed', !isCollapsed);
 }
 
-// Ajoute l'event listener après avoir créé les groupes
+// Add event listener after creating groups
 function enableGroupCollapse() {
     document.querySelectorAll('.group-header').forEach(header => {
         header.onclick = function(e) {
@@ -985,6 +1126,7 @@ function createGroupSection(groupName, users) {
     return section;
 }
 
+
 // ============================================================================
 // EVENT LISTENERS & INITIALIZATION
 // ============================================================================
@@ -1014,13 +1156,19 @@ document.addEventListener('click', function(event) {
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize theme
     initTheme();
-    
+
     // Initialize active menu button
     const detailButton = document.querySelector('.main-menu button[onclick*="detail"]');
     if (detailButton) {
         detailButton.classList.add('active');
     }
     
+    // Search
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        toggleClearButton();
+    }
+
     // Initialize UI state
     updateDetailButtons();
     updateResultsCount();
