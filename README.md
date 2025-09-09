@@ -32,6 +32,7 @@
     <li><a href="#why">Why</a></li>
     <li><a href="#usage">Usage</a></li>
     <li><a href="#features">Features</a></li>
+    <li><a href="#filters">All Filters</a></li>
     <li><a href="#roadmap">Roadmap</a></li>
     <li><a href="#screenshots">Screenshots</a></li>
   </ol>
