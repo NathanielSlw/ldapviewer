@@ -80,6 +80,37 @@ python ldapviewer.py *.json
 - **Modern responsive interface**: All HTML/CSS/JS is embedded and works offline.
 - **Dark mode**: Switch between light and dark themes with automatic system preference detection.
 
+## Filters
+
+#### UAC Filters
+- Account disabled 
+- No Kerberos PreAuth (ASREProastable)
+- Unconstrained Delegation (KUD)
+- Constrained Delegation (KCD w/ protocol transition)
+- Cannot be delegated
+
+Password Related :
+- Password Not Required
+- Password Never Expires
+- User Cannot Change Password
+- Password Expired
+
+Authentication Related :
+- Smartcard Required
+- Account Locked Out
+- Reversible Encryption
+- Use DES Key Only
+
+#### LDAP Filters
+- Has SPN (Kerberoastable)
+- AdminCount=1
+- Constrained Delegation (KCD w/o protocol transition)
+- Has Description
+
+#### General Filters
+- Non-default objects only
+- Default objects only
+
 ## Roadmap
 
 See the [project roadmap](https://github.com/users/NathanielSlw/projects/2) for a full list of planned features, improvements, and known issues.
