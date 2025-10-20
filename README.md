@@ -71,46 +71,62 @@ python ldapviewer.py *.json
 
 **ldapviewer** lets you quickly and interactively explore the full content of an LDAP JSON dump:
 
+#### Core Views
 - **Detail view**: See all attributes for each LDAP entry, nothing is hidden.
 - **Table view**: All entries and all attributes as columns, for easy comparison.
+- **Statistics page**: View comprehensive statistics and distribution charts for your LDAP data.
+
+#### Core features
 - **Instant search**: Filter entries as you type.
+- **Filtering**
+  - **UAC filtering**: Filter users by UserAccountControl flags with one click.
+  - **LDAP Attribute-based filtering**: Filter entries by LDAP attributes (e.g., has SPN, msDS-AllowedToDelegateTo, has Description)
+  - **General filtering**: Default/non-default, recently created, inactive, never logged in
 - **CSV export**: Export the current table view to CSV.
-- **Non-default object filtering**: Instantly hide/show default Windows objects (RID < 1000).
-- **UAC filtering**: Filter users by UserAccountControl flags with one click.
-- **Attribute-based filtering**: Filter entries by LDAP attributes (e.g., has SPN, msDS-AllowedToDelegateTo, has Description)
+- **Object tagging**: Right-click on any object to mark it as owned or high value target.
+
+#### Interface
 - **Modern responsive interface**: All HTML/CSS/JS is embedded and works offline.
 - **Dark mode**: Switch between light and dark themes with automatic system preference detection.
 
 ## Filters
 
 #### UAC Filters
-- Account disabled 
+- Account Enabled
+- Account Disabled
 - No Kerberos PreAuth (ASREProastable)
 - Unconstrained Delegation (KUD)
 - Constrained Delegation (KCD w/ protocol transition)
 - Cannot be delegated
 
-Password Related :
+Password Related:
 - Password Not Required
 - Password Never Expires
 - User Cannot Change Password
 - Password Expired
 
-Authentication Related :
+Authentication Related:
 - Smartcard Required
 - Account Locked Out
 - Reversible Encryption
 - Use DES Key Only
 
 #### LDAP Filters
-- Has SPN (Kerberoastable)
+- Has SPN (Kerberoastable - requires SPN and enabled account)
 - AdminCount=1
 - Constrained Delegation (KCD w/o protocol transition)
+- RBCD Delegation (Resource-Based Constrained Delegation)
 - Has Description
+- Unsupported OS
 
 #### General Filters
 - Non-default objects only
 - Default objects only
+- Recently Created (last 30 days)
+- Inactive Accounts (last logon > 90 days)
+- Never Logged In (logon count = 0)
+- Owned Objects
+- Non-Owned Objects
 
 ## Roadmap
 
