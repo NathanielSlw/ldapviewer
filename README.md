@@ -46,6 +46,12 @@ I created this tool because:
 2. I wanted to avoid running additional `ldapsearch` queries for information I already had, and not struggle with LDAP query syntax.
 3. I needed an easy way to filter and search LDAP data for fields that are useful during penetration testing.
 
+## Demo
+
+Want to see ldapviewer in action before using it? Download the example file and open it in your browser:
+
+👉 **[Download ldapviewer_example.html](ldapviewer_example.html)**
+
 ## Usage
 
 ```sh
@@ -81,7 +87,7 @@ python ldapviewer.py *.json
 - **Filtering**
   - **UAC filtering**: Filter users by UserAccountControl flags with one click.
   - **LDAP Attribute-based filtering**: Filter entries by LDAP attributes (e.g., has SPN, msDS-AllowedToDelegateTo, has Description)
-  - **General filtering**: Default/non-default, recently created, inactive, never logged in
+  - **General filtering**: Default/non-default objects, recently created, inactive, never logged in
 - **CSV export**: Export the current table view to CSV.
 - **Object tagging**: Right-click on any object to mark it as owned or high value target.
 
@@ -141,6 +147,14 @@ See the [project roadmap](https://github.com/users/NathanielSlw/projects/2) for 
 
 ### Table View
 ![Table View](screenshots/table_view.png)
+
+### Statistics
+
+![Statistics General](screenshots/statistics1.png)
+
+![Statistics UAC](screenshots/statistics2.png)
+
+![Statistics LDAP](screenshots/statistics3.png)
 
 ### Filters
 
