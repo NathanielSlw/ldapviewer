@@ -92,15 +92,23 @@ function updateDetailButtons() {
     const expandBtn = document.getElementById('expandBtn');
     const collapseBtn = document.getElementById('collapseBtn');
     const groupByBtn = document.getElementById('groupByBtn');
+    const tableButtons = document.getElementById('tableButtons');
     
     if (currentView === 'detail') {
         expandBtn.style.display = '';
         collapseBtn.style.display = '';
         groupByBtn.style.display = '';
+        tableButtons.style.display = 'none';
+    } else if (currentView === 'table') {
+        expandBtn.style.display = 'none';
+        collapseBtn.style.display = 'none';
+        groupByBtn.style.display = 'none';
+        tableButtons.style.display = 'flex';
     } else {
         expandBtn.style.display = 'none';
         collapseBtn.style.display = 'none';
         groupByBtn.style.display = 'none';
+        tableButtons.style.display = 'none';
     }
 }
 
@@ -126,25 +134,45 @@ function setActiveMenuButton(activeButton) {
 function switchView(view) {
     const detailView = document.getElementById('detailView');
     const tableView = document.getElementById('tableView');
+    const statsView = document.getElementById('statsView');
     const detailButtons = document.getElementById('detailButtons');
+    const tableButtons = document.getElementById('tableButtons');
     const activeButton = event ? event.target : null;
-    
+    const body = document.body;
+
     currentView = view;
+    
+    // Hide all views first
+    detailView.classList.add('hidden');
+    tableView.classList.add('hidden');
+    statsView.classList.add('hidden');
+
+    // Remove stats view class from body
+    body.classList.remove('stats-view-active');
     
     if (view === 'detail') {
         detailView.classList.remove('hidden');
-        tableView.classList.add('hidden');
         detailButtons.style.display = 'flex';
+        tableButtons.style.display = 'none';
         setActiveMenuButton(activeButton);
+        // Re-apply all filters
+        applyAllFilters();
     } else if (view === 'table') {
-        detailView.classList.add('hidden');
         tableView.classList.remove('hidden');
         detailButtons.style.display = 'none';
+        tableButtons.style.display = 'flex';
         setActiveMenuButton(activeButton);
+        // Re-apply all filters
+        applyAllFilters();
+    } else if (view === 'stats') {
+        statsView.classList.remove('hidden');
+        detailButtons.style.display = 'none';
+        tableButtons.style.display = 'none';
+        setActiveMenuButton(activeButton);
+        // Add stats view class to body to hide search/filters
+        body.classList.add('stats-view-active');
+        // Statistics are pre-generated, no need to calculate
     }
-    
-    // Re-apply all filters when switching views
-    applyAllFilters();
 }
 
 // =============================================================================
@@ -198,10 +226,23 @@ function hasUACFlags(userAccountControl, flags) {
     const uac = parseInt(userAccountControl, 10);
     if (isNaN(uac)) return false;
     
-    return flags.every(flag => (uac & flag) !== 0);
+    return flags.every(flagObj => {
+        if (flagObj.inverse) {
+            // We want the flag NOT to be present
+            return (uac & flagObj.value) === 0;
+        } else {
+            // We want the flag to be present
+            return (uac & flagObj.value) !== 0;
+        }
+    });
 }
 
 function hasLDAPAttribute(entry, attributeName, expectedValue = null) {
+    // Special case for Kerberoastable (Has SPN)
+    if (attributeName === 'servicePrincipalName' && expectedValue === null) {
+        return isKerberoastable(entry);
+    }
+
     const attributeCell = Array.from(entry.getElementsByClassName('key'))
         .find(cell => cell.textContent === attributeName);
     
@@ -219,17 +260,59 @@ function hasLDAPAttribute(entry, attributeName, expectedValue = null) {
     return attributeValue === expectedValue;
 }
 
-function applyRIDFilter(rid, ridFilterType) {
-    if (!ridFilterType || rid === null) return true;
-    
-    switch (ridFilterType) {
-        case 'default':
-            return rid <= 1000;
-        case 'nonDefault':
-            return rid > 1000;
-        default:
-            return true;
+/**
+ * Parse Active Directory date strings
+ * @param {string} dateStr - The date string to parse
+ * @returns {Date} - The parsed Date object
+ */
+function parseADDate(dateStr) {
+  // If the string contains microseconds (.)
+  if (dateStr.includes(".")) {
+    // Ignore everything after the dot
+    return new Date(dateStr.split(".")[0]);
+  } else {
+    // Remove the +00:00 (timezone) if present
+    return new Date(dateStr.replace("+00:00", ""));
+  }
+}
+
+/**
+ * Check if the operating system is unsupported
+ */
+function hasUnsupportedOS(osValue) {
+    if (!osValue) return false;
+    const regex = /(2000|2003|2008|xp|vista|7|me)/i;
+    return regex.test(osValue);
+}
+
+/**
+ * Returns true if the entry is Kerberoastable:
+ * - Has servicePrincipalName
+ * - Is NOT disabled (ACCOUNTDISABLE flag absent)
+ */
+function isKerberoastable(entry) {
+    // Get SPN value
+    const spnCell = Array.from(entry.getElementsByClassName('key'))
+        .find(cell => cell.textContent === 'servicePrincipalName');
+    let hasSPN = false;
+    if (spnCell) {
+        const valueCell = spnCell.nextElementSibling;
+        hasSPN = valueCell && valueCell.textContent.trim() !== '';
     }
+
+    // Get UAC value
+    const uacCell = Array.from(entry.getElementsByClassName('key'))
+        .find(cell => cell.textContent === 'userAccountControl');
+    let isDisabled = false;
+    if (uacCell) {
+        const valueCell = uacCell.nextElementSibling;
+        const uacContainer = valueCell.querySelector('.uac-value');
+        const uacValue = uacContainer ? uacContainer.textContent : valueCell.textContent;
+        const uacInt = parseInt(uacValue, 10);
+        isDisabled = !isNaN(uacInt) && (uacInt & 2) !== 0;
+    }
+
+    return hasSPN && !isDisabled;
 }
 
 // ============================================================================
@@ -245,7 +328,7 @@ let filterStates = {
     search: '',
     general: {
         enabled: false,
-        ridFilter: null // 'default' (<=1000), 'nonDefault' (>1000), or null (everyone)
+        generalFilter: null 
     },
     uac: {
         enabled: false,
@@ -256,6 +339,78 @@ let filterStates = {
         attributes: []
     }
 };
+
+// Function to apply general filters 
+function applyGeneralFilter(entry, filterType) {
+    if (!filterType) return true;
+    const now = new Date();
+
+    switch (filterType) {
+        case 'default':
+        case 'nonDefault': {
+            // RID logic
+            const objectSIDCell = Array.from(entry.getElementsByClassName('key'))
+                .find(cell => cell.textContent === 'objectSid');
+            let rid = null;
+            if (objectSIDCell) {
+                const valueCell = objectSIDCell.nextElementSibling;
+                rid = getRIDFromObjectSID(valueCell ? valueCell.textContent : "");
+            }
+            if (filterType === 'default') return rid !== null && rid <= 1000;
+            if (filterType === 'nonDefault') return rid !== null && rid > 1000;
+            return true;
+        }
+        case 'recentlyCreated': {
+            // whenCreated < 30 jours
+            const cell = Array.from(entry.getElementsByClassName('key')).find(c => c.textContent === 'whenCreated');
+            let whenCreated = null;
+            if (cell) {
+                const valueCell = cell.nextElementSibling;
+                whenCreated = valueCell ? valueCell.textContent.trim() : null;
+            }
+            // If there is no whenCreated date, do not display the entry
+            if (!whenCreated || whenCreated === '') {
+                return false;
+            }
+            const createdDate = parseADDate(whenCreated);
+            if (!createdDate) return false;
+            const diffDays = (now - createdDate) / (1000 * 60 * 60 * 24);
+            return diffDays <= 30;
+        }
+        case 'inactiveAccounts': {
+            // lastLogon > 90 jours
+            const cell = Array.from(entry.getElementsByClassName('key')).find(c => c.textContent === 'lastLogon');
+            let lastLogon = null;
+            if (cell) {
+                const valueCell = cell.nextElementSibling;
+                lastLogon = valueCell ? valueCell.textContent.trim() : null;
+            }
+            // if there is no lastLogon or if it is the default AD date, do not display
+            if (!lastLogon || lastLogon === '' || lastLogon === "1601-01-01 00:00:00+00:00") {
+                return false;
+            }
+            const logonDate = parseADDate(lastLogon);
+            const diffLogonDays = (now - logonDate) / (1000 * 60 * 60 * 24);
+            return diffLogonDays > 90;
+        }
+        case 'neverLoggedIn': {
+            // logonCount == 0
+            const cell = Array.from(entry.getElementsByClassName('key')).find(c => c.textContent === 'logonCount');
+            let logonCount = null;
+            if (cell) {
+                const valueCell = cell.nextElementSibling;
+                logonCount = valueCell ? valueCell.textContent.trim() : null;
+            }
+            return logonCount === '0';
+        }
+        case 'owned':
+            return entry.classList.contains('owned');
+        case 'nonowned':
+            return !entry.classList.contains('owned');
+        default:
+            return true;
+    }
+}
 
 /**
  * Main filtering function that applies all active filters
@@ -294,16 +449,9 @@ function applyFiltersToDetailView() {
                     shouldShow = searchableText.includes(filterStates.search);
                 }
 
-                // Apply RID-based filter (default/non-default)
+                // Apply general filter
                 if (filterStates.general.enabled && shouldShow) {
-                    const objectSIDCell = Array.from(entry.getElementsByClassName('key'))
-                        .find(cell => cell.textContent === 'objectSid');
-                    let rid = null;
-                    if (objectSIDCell) {
-                        const valueCell = objectSIDCell.nextElementSibling;
-                        rid = getRIDFromObjectSID(valueCell ? valueCell.textContent : "");
-                    }
-                    shouldShow = applyRIDFilter(rid, filterStates.general.ridFilter);
+                    shouldShow = applyGeneralFilter(entry, filterStates.general.generalFilter);
                 }
                 
                 // Apply UAC filter
@@ -324,9 +472,16 @@ function applyFiltersToDetailView() {
                 
                 // Apply LDAP attributes filter
                 if (filterStates.ldapAttributes.enabled && shouldShow) {
-                    shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => 
-                        hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value)
-                    );
+                    shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => {
+                        if (attrFilter.unsupportedOS) {
+                            // Cherche la valeur de operatingSystem
+                            const osCell = Array.from(entry.getElementsByClassName('key')).find(cell => cell.textContent === 'operatingSystem');
+                            const osValue = osCell ? osCell.nextElementSibling.textContent.trim() : "";
+                            return hasUnsupportedOS(osValue);
+                        } else {
+                            return hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value);
+                        }
+                    });
                 }
                 
                 entry.style.display = shouldShow ? "" : "none";
@@ -355,16 +510,9 @@ function applyFiltersToDetailView() {
                 shouldShow = searchableText.includes(filterStates.search);
             }
 
-            // Apply RID-based filter (default/non-default)
+            // Apply General Filter
             if (filterStates.general.enabled && shouldShow) {
-                const objectSIDCell = Array.from(entry.getElementsByClassName('key'))
-                    .find(cell => cell.textContent === 'objectSid');
-                let rid = null;
-                if (objectSIDCell) {
-                    const valueCell = objectSIDCell.nextElementSibling;
-                    rid = getRIDFromObjectSID(valueCell ? valueCell.textContent : "");
-                }
-                shouldShow = applyRIDFilter(rid, filterStates.general.ridFilter);
+                shouldShow = applyGeneralFilter(entry, filterStates.general.generalFilter);
             }
             
             // Apply UAC filter
@@ -385,9 +533,16 @@ function applyFiltersToDetailView() {
             
             // Apply LDAP attributes filter
             if (filterStates.ldapAttributes.enabled && shouldShow) {
-                shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => 
-                    hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value)
-                );
+                shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => {
+                    if (attrFilter.unsupportedOS) {
+                        // Cherche la valeur de operatingSystem
+                        const osCell = Array.from(entry.getElementsByClassName('key')).find(cell => cell.textContent === 'operatingSystem');
+                        const osValue = osCell ? osCell.nextElementSibling.textContent.trim() : "";
+                        return hasUnsupportedOS(osValue);
+                    } else {
+                        return hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value);
+                    }
+                });
             }
             
             entry.style.display = shouldShow ? "" : "none";
@@ -405,6 +560,10 @@ function applyFiltersToTableView() {
     // Find column indices once
     const objectSIDIndex = Array.from(ths).findIndex(th => th.textContent === "objectSid");
     const uacIndex = Array.from(ths).findIndex(th => th.textContent === "userAccountControl");
+    
+    const whenCreatedIndex = Array.from(ths).findIndex(th => th.textContent === "whenCreated");
+    const lastLogonIndex = Array.from(ths).findIndex(th => th.textContent === "lastLogon");
+    const logonCountIndex = Array.from(ths).findIndex(th => th.textContent === "logonCount");
     
     rows.forEach(row => {
         let shouldShow = true;
@@ -432,17 +591,61 @@ function applyFiltersToTableView() {
             
             shouldShow = searchableText.toLowerCase().includes(filterStates.search);
         }
-        
-        // Apply RID-based filter (default/non-default)
-        if (filterStates.general.enabled && shouldShow) {
-            let rid = null;
-            if (objectSIDIndex !== -1) {
-                const cell = row.cells[objectSIDIndex];
-                rid = getRIDFromObjectSID(cell ? cell.textContent : "");
-            }
-            shouldShow = applyRIDFilter(rid, filterStates.general.ridFilter);
-        }
 
+        if (filterStates.general.enabled && shouldShow) {
+            const type = filterStates.general.generalFilter;
+            const now = new Date();
+            switch (type) {
+                case 'default':
+                case 'nonDefault': {
+                    let rid = null;
+                    if (objectSIDIndex !== -1) {
+                        const cell = row.cells[objectSIDIndex];
+                        rid = getRIDFromObjectSID(cell ? cell.textContent : "");
+                    }
+                    if (type === 'default') shouldShow = rid !== null && rid <= 1000;
+                    if (type === 'nonDefault') shouldShow = rid !== null && rid > 1000;
+                    break;
+                }
+                case 'recentlyCreated': {
+                    let whenCreated = null;
+                    if (whenCreatedIndex !== -1) {
+                        const cell = row.cells[whenCreatedIndex];
+                        whenCreated = cell ? cell.textContent.trim() : null;
+                    }
+                    const createdDate = parseADDate(whenCreated);
+                    shouldShow = createdDate && ((now - createdDate) / (1000 * 60 * 60 * 24) <= 30);
+                    break;
+                }
+                case 'inactiveAccounts': {
+                    let lastLogon = null;
+                    if (lastLogonIndex !== -1) {
+                        const cell = row.cells[lastLogonIndex];
+                        lastLogon = cell ? cell.textContent.trim() : null;
+                    }
+                    // Ignore "1601-01-01 00:00:00+00:00"
+                    if (!lastLogon || lastLogon === "1601-01-01 00:00:00+00:00") {
+                        shouldShow = false;
+                        break;
+                    }
+                    const logonDate = parseADDate(lastLogon);
+                    shouldShow = logonDate && ((now - logonDate) / (1000 * 60 * 60 * 24) > 90);
+                    break;
+                }
+                case 'neverLoggedIn': {
+                    let logonCount = null;
+                    if (logonCountIndex !== -1) {
+                        const cell = row.cells[logonCountIndex];
+                        logonCount = cell ? cell.textContent.trim() : null;
+                    }
+                    shouldShow = logonCount === '0';
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+        
         // Apply UAC filter
         if (filterStates.uac.enabled && shouldShow) {
             if (uacIndex !== -1) {
@@ -459,19 +662,46 @@ function applyFiltersToTableView() {
         // Apply LDAP attributes filter
         if (filterStates.ldapAttributes.enabled && shouldShow) {
             shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => {
-                const attrIndex = Array.from(ths).findIndex(th => th.textContent === attrFilter.attribute);
-                
-                if (attrIndex !== -1) {
-                    const cell = row.cells[attrIndex];
-                    const cellValue = cell ? cell.textContent.trim() : "";
-                    
-                    if (attrFilter.value === null) {
-                        return cellValue !== '';
-                    } else {
-                        return cellValue === attrFilter.value;
+                if (attrFilter.unsupportedOS) {
+                    const ths = document.querySelectorAll("#tableView thead th");
+                    const osIndex = Array.from(ths).findIndex(th => th.textContent === "operatingSystem");
+                    if (osIndex !== -1) {
+                        const cell = row.cells[osIndex];
+                        const osValue = cell ? cell.textContent.trim() : "";
+                        return hasUnsupportedOS(osValue);
                     }
+                    return false;
+                } else if (attrFilter.attribute === 'servicePrincipalName' && attrFilter.value === null) {
+                    // Kerberoastable logic for table view
+                    const spnIndex = Array.from(ths).findIndex(th => th.textContent === 'servicePrincipalName');
+                    const uacIndex = Array.from(ths).findIndex(th => th.textContent === 'userAccountControl');
+                    if (spnIndex !== -1 && uacIndex !== -1) {
+                        const spnCell = row.cells[spnIndex];
+                        const uacCell = row.cells[uacIndex];
+                        const hasSPN = spnCell && spnCell.textContent.trim() !== '';
+                        let isDisabled = false;
+                        if (uacCell) {
+                            const uacContainer = uacCell.querySelector('.uac-value');
+                            const uacValue = uacContainer ? uacContainer.textContent : uacCell.textContent;
+                            const uacInt = parseInt(uacValue, 10);
+                            isDisabled = !isNaN(uacInt) && (uacInt & 2) !== 0;
+                        }
+                        return hasSPN && !isDisabled;
+                    }
+                    return false;
+                } else {
+                    const attrIndex = Array.from(ths).findIndex(th => th.textContent === attrFilter.attribute);
+                    if (attrIndex !== -1) {
+                        const cell = row.cells[attrIndex];
+                        const cellValue = cell ? cell.textContent.trim() : "";
+                        if (attrFilter.value === null) {
+                            return cellValue !== '';
+                        } else {
+                            return cellValue === attrFilter.value;
+                        }
+                    }
+                    return false;
                 }
-                return false;
             });
         }
         
@@ -622,7 +852,12 @@ function updateResultsCount() {
 
 function applyUACFilter() {
     const activeChips = document.querySelectorAll('#uacTab .filter-chip.active');
-    const selectedFlags = Array.from(activeChips).map(chip => parseInt(chip.dataset.value, 10));
+    const selectedFlags = Array.from(activeChips).map(chip => {
+        return {
+            value: parseInt(chip.dataset.value, 10),
+            inverse: chip.dataset.inverse === "true"
+        };
+    });
     
     filterStates.uac.enabled = selectedFlags.length > 0;
     filterStates.uac.flags = selectedFlags;
@@ -646,22 +881,47 @@ function applyLDAPAttributeFilter() {
 function toggleGeneralFilter(element, filterType) {
     const isActive = element.classList.contains('active');
     
-    // Désactiver tous les filtres généraux d'abord
+    // Disable all general filters first
     document.querySelectorAll('#generalTab .filter-chip').forEach(chip => {
         chip.classList.remove('active');
     });
-    
-    // Si le chip n'était pas actif, l'activer
+
+    // If the chip was not active, activate it
     if (!isActive) {
         element.classList.add('active');
         filterStates.general.enabled = true;
-        filterStates.general.ridFilter = filterType;
+        filterStates.general.generalFilter = filterType;
     } else {
-        // Si il était actif et qu'on clique dessus, le désactiver
+        // If it was active and clicked, deactivate it
         filterStates.general.enabled = false;
-        filterStates.general.ridFilter = null;
+        filterStates.general.generalFilter = null;
     }
     
+    updateActiveFilterChips();
+    updateFilterCount();
+    applyAllFilters();
+}
+
+function toggleUnsupportedOSFilter(element) {
+    const isActive = element.classList.contains('active');
+    if (!isActive) {
+        element.classList.add('active');
+        filterStates.ldapAttributes.enabled = true;
+        // Add a special filter for Unsupported OS
+        filterStates.ldapAttributes.attributes.push({
+            attribute: 'operatingSystem',
+            value: null,
+            unsupportedOS: true
+        });
+    } else {
+        element.classList.remove('active');
+        // Remove the special filter
+        filterStates.ldapAttributes.attributes = filterStates.ldapAttributes.attributes.filter(attr => !attr.unsupportedOS);
+        // Disable if no more LDAP filters
+        if (filterStates.ldapAttributes.attributes.length === 0) {
+            filterStates.ldapAttributes.enabled = false;
+        }
+    }
     updateActiveFilterChips();
     updateFilterCount();
     applyAllFilters();
@@ -770,7 +1030,7 @@ function removeActiveFilter(type, removeButton) {
             chip.classList.remove('active');
         });
         filterStates.general.enabled = false;
-        filterStates.general.ridFilter = null;
+        filterStates.general.generalFilter = null;
         applyAllFilters();
     }
     
@@ -795,7 +1055,7 @@ function clearAllFilters() {
     filterStates.ldapAttributes.enabled = false;
     filterStates.ldapAttributes.attributes = [];
     filterStates.general.enabled = false;
-    filterStates.general.ridFilter = null;
+    filterStates.general.generalFilter = null;
 
     updateActiveFilterChips();
     updateFilterCount();
@@ -803,6 +1063,189 @@ function clearAllFilters() {
     
     // Close dropdown
     toggleFilterDropdown();
+}
+
+// ============================================================================
+// OWNED OBJECT & HIGH VALUE TARGETS FUNCTIONALITY
+// ============================================================================
+
+let contextMenu = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Create context menu
+    createContextMenu();
+
+    // Prevent default context menu
+    document.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+    });
+
+    // Hide context menu on click elsewhere
+    document.addEventListener('click', function(e) {
+        if (contextMenu) {
+            contextMenu.style.display = 'none';
+        }
+    });
+});
+
+function createContextMenu() {
+    contextMenu = document.createElement('div');
+    contextMenu.className = 'context-menu';
+    document.body.appendChild(contextMenu);
+}
+
+function updateContextMenuContent(entry) {
+    const isOwned = entry.classList.contains('owned');
+    const isHighValue = entry.classList.contains('high-value-target');
+
+    contextMenu.innerHTML = `
+        <div class="context-menu-item toggle-owned">
+            <span class="menu-icon">${isOwned ? '🚫' : '👑'}</span>
+            ${isOwned ? 'Unmark as Owned' : 'Mark as Owned'}
+        </div>
+        <div class="context-menu-item toggle-high-value">
+            <span class="menu-icon">${isHighValue ? '🚫' : '💎'}</span>
+            ${isHighValue ? 'Unmark as High Value' : 'Mark as High Value Target'}
+        </div>
+    `;
+
+    // Reattach click event
+    contextMenu.querySelector('.toggle-owned').addEventListener('click', function() {
+        if (contextMenu.targetEntry) {
+            toggleOwned(contextMenu.targetEntry);
+        }
+        contextMenu.style.display = 'none';
+    });
+
+    contextMenu.querySelector('.toggle-high-value').addEventListener('click', function() {
+        if (contextMenu.targetEntry) {
+            toggleHighValue(contextMenu.targetEntry);
+        }
+        contextMenu.style.display = 'none';
+    });
+}
+
+function toggleOwned(entry) {
+    entry.classList.toggle('owned');
+    // Save the state in localStorage
+    const entryId = entry.querySelector('.attributes').id;
+    const ownedEntries = JSON.parse(localStorage.getItem('ownedEntries') || '[]');
+    
+    if (entry.classList.contains('owned')) {
+        if (!ownedEntries.includes(entryId)) {
+            ownedEntries.push(entryId);
+        }
+    } else {
+        const index = ownedEntries.indexOf(entryId);
+        if (index > -1) {
+            ownedEntries.splice(index, 1);
+        }
+    }
+    
+    localStorage.setItem('ownedEntries', JSON.stringify(ownedEntries));
+}
+
+function toggleHighValue(entry) {
+    entry.classList.toggle('high-value-target');
+    
+    // Gérer le badge
+    const h2 = entry.querySelector('h2');
+    let badge = h2.querySelector('.high-value-badge');
+    
+    if (entry.classList.contains('high-value-target')) {
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'high-value-badge';
+            badge.innerHTML = '💎';
+            h2.appendChild(badge);
+        }
+    } else if (badge) {
+        badge.remove();
+    }
+    
+    // Sauvegarder dans le localStorage
+    const entryId = entry.querySelector('.attributes').id;
+    const highValueEntries = JSON.parse(localStorage.getItem('highValueEntries') || '[]');
+    
+    if (entry.classList.contains('high-value-target')) {
+        if (!highValueEntries.includes(entryId)) {
+            highValueEntries.push(entryId);
+        }
+    } else {
+        const index = highValueEntries.indexOf(entryId);
+        if (index > -1) {
+            highValueEntries.splice(index, 1);
+        }
+    }
+    
+    localStorage.setItem('highValueEntries', JSON.stringify(highValueEntries));
+}
+
+// Right click event listener on entry elements
+document.addEventListener('contextmenu', function(e) {
+    const entry = e.target.closest('.entry');
+    if (entry) {
+        e.preventDefault();
+        updateContextMenuContent(entry);
+        
+        // Position the context menu
+        contextMenu.style.display = 'block';
+        
+        // Use clientX/clientY for fixed positioning (relative to viewport)
+        let x = e.clientX;
+        let y = e.clientY;
+        
+        // Get menu dimensions after making it visible
+        const menuRect = contextMenu.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        
+        // Adjust position if menu would go outside viewport
+        if (x + menuRect.width > viewportWidth) {
+            x = viewportWidth - menuRect.width - 10;
+        }
+        if (y + menuRect.height > viewportHeight) {
+            y = viewportHeight - menuRect.height - 10;
+        }
+        
+        // Ensure minimum distance from edges
+        x = Math.max(10, x);
+        y = Math.max(10, y);
+        
+        contextMenu.style.left = x + 'px';
+        contextMenu.style.top = y + 'px';
+        contextMenu.targetEntry = entry;
+    }
+});
+
+// Restore owned entries on load
+function restoreOwnedEntries() {
+    const ownedEntries = JSON.parse(localStorage.getItem('ownedEntries') || '[]');
+    ownedEntries.forEach(id => {
+        const entry = document.querySelector(`#${id}`);
+        if (entry) {
+            entry.closest('.entry').classList.add('owned');
+        }
+    });
+}
+
+function restoreHighValueTargets() {
+    const highValueEntries = JSON.parse(localStorage.getItem('highValueEntries') || '[]');
+    highValueEntries.forEach(id => {
+        const entry = document.querySelector(`#${id}`);
+        if (entry) {
+            const entryParent = entry.closest('.entry');
+            entryParent.classList.add('high-value-target');
+            
+            const h2 = entryParent.querySelector('h2');
+            if (h2 && !h2.querySelector('.high-value-badge')) {
+                const badge = document.createElement('span');
+                badge.className = 'high-value-badge';
+                badge.innerHTML = '💎';
+                h2.appendChild(badge);
+            }
+        }
+    });
 }
 
 // ============================================================================
@@ -1173,4 +1616,12 @@ document.addEventListener('DOMContentLoaded', function() {
     updateDetailButtons();
     updateResultsCount();
     updateFilterCount();
+
+    // Restore owned entries
+    restoreOwnedEntries();
+
+    // Restore high value targets
+    restoreHighValueTargets();
 });
+
+

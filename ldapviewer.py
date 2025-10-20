@@ -120,6 +120,26 @@ def format_uac_display_html(uac_value, flags):
     </div>
     '''
 
+def getRIDFromObjectSID(objectSID):
+    """
+    Extract RID (Relative Identifier) from objectSID
+    
+    Args:
+        objectSID: objectSID value (string format like "S-1-5-21-...")
+        
+    Returns:
+        int: RID value or None if invalid
+    """
+    try:
+        if isinstance(objectSID, str) and objectSID.startswith('S-'):
+            # Split SID by dashes and get the last part (RID)
+            parts = objectSID.split('-')
+            if len(parts) >= 4:
+                return int(parts[-1])
+    except (ValueError, AttributeError, IndexError):
+        pass
+    return None
+
 # ============================================================================
 # LDAP DATA PROCESSING UTILITIES
 # ============================================================================
@@ -127,24 +147,29 @@ def format_uac_display_html(uac_value, flags):
 
 def extract_display_name(attributes, dn):
     """
-    Extract display name from LDAP entry attributes or DN
+    Extract best display name from LDAP entry attributes or DN
     
     Args:
         attributes (dict): LDAP entry attributes
         dn (str): Distinguished Name
         
     Returns:
-        str: Display name (CN value or extracted from DN)
+        str: Display name (prefer sAMAccountName, fallback to CN, then DN)
     """
-    # Extract CN from attributes, fallback to DN if CN doesn't exist
-    cn_values = attributes.get("cn", [])
-    if cn_values:
-        return cn_values[0]  # Take the first CN value
-    else:  
-        if dn and dn.upper().startswith('CN='):
-            return dn.split(',')[0][3:]  # Remove "CN=" prefix
-        else:
-            return dn
+    # Priority 1 : sAMAccountName
+    sam = attributes.get("sAMAccountName", [])
+    if sam:
+        return sam[0]
+
+    # Priority 2 : CN
+    cn = attributes.get("cn", [])
+    if cn:
+        return cn[0]
+
+    # Priority 3 : DN fallback
+    if dn and dn.upper().startswith('CN='):
+        return dn.split(',')[0][3:]
+    return dn
    
 def extract_group_names(memberof_values, attributes):
     """
@@ -230,7 +255,537 @@ def is_kerberoastable(attributes):
     Returns True if the user is kerberoastable (has servicePrincipalName).
     """
     spn_values = attributes.get("servicePrincipalName", [])
-    return bool(spn_values)
+    uac_values = attributes.get("userAccountControl", [])
+    if not spn_values:
+        return False
+    if uac_values:
+        try:
+            uac_value = int(uac_values[0])
+            # ACCOUNTDISABLE flag is 0x0002
+            if uac_value & 0x0002:
+                return False
+        except (ValueError, TypeError):
+            pass
+    return True
+
+
+# ============================================================================
+# STATISTICS CALCULATION FUNCTIONS
+# ============================================================================
+# Functions to calculate statistics from LDAP data
+
+from datetime import datetime, timedelta
+
+def parse_ad_date(date_str):
+    """
+    Convert Windows FileTime to Python datetime
+    """
+    if '.' in date_str:
+        # Handle microseconds
+        return datetime.fromisoformat(date_str.split('.')[0])
+    else:
+        return datetime.fromisoformat(date_str.replace('+00:00', ''))
+    
+def calculate_ldap_statistics(data):
+    """
+    Calculate comprehensive statistics from LDAP data
+    
+    Args:
+        data (list): List of LDAP entry dictionaries
+        
+    Returns:
+        dict: Dictionary containing all calculated statistics
+    """
+    from datetime import datetime, timedelta, timezone
+    
+    total_objects = len(data)
+    stats = {
+        'global': {
+            'totalObjects': total_objects,
+            'recentlyCreated': 0,
+            'defaultObjects': 0,        # RID <= 1000
+            'nonDefaultObjects': 0,     # RID > 1000
+            'inactiveAccounts': 0,      # lastLogon > 90 days
+            'neverLoggedIn': 0          # logonCount == 0
+        },
+        'uac': {
+            # Security Critical
+            'disabledAccounts': 0,
+            'noKerberosPreAuth': 0,
+            'trustedForDelegation': 0,
+            'constrainedDelegation': 0,
+            'notDelegated': 0,
+            # Password Related
+            'passwordNotRequired': 0,
+            'passwordNeverExpires': 0,
+            'passwordCantChange': 0,
+            'passwordExpired': 0,
+            # Authentication & Access
+            'smartcardRequired': 0,
+            'accountLocked': 0,
+            'reversibleEncryption': 0,
+            'useDESKey': 0
+        },
+        'ldap': {
+            # Security Critical Attributes
+            'spnUsers': 0,
+            'adminCountUsers': 0,
+            'constrainedDelegationTarget': 0,
+            'resourceBasedConstrainedDelegation': 0,
+            # Information Disclosure
+            'hasDescription': 0,
+            'unsupportedOS': 0,
+        },
+        'groups': {},
+        'uacStats': {},
+        'objectTypes': {},
+        'osDistribution': {}
+    }
+    
+    # Date for recent accounts (30 days ago)
+    thirty_days_ago = datetime.now() - timedelta(days=30)
+    ninety_days_ago = datetime.now() - timedelta(days=90)
+    
+    for entry in data:
+        attributes = entry.get("attributes", {})
+        
+        ### Global Statistics -------------------------------------------------------------------------
+
+        # RID-based statistics (Default vs Non-default objects)
+        object_sid = attributes.get("objectSid", [])
+        if object_sid:
+            try:
+                rid = getRIDFromObjectSID(object_sid[0])
+                if rid is not None:
+                    if rid <= 1000:
+                        stats['global']['defaultObjects'] += 1
+                    else:
+                        stats['global']['nonDefaultObjects'] += 1
+            except (ValueError, TypeError, IndexError):
+                pass
+        
+        # Recently created check
+        when_created = attributes.get("whenCreated", [])
+        if when_created:
+            try:
+                # Parse date - handle different formats
+                date_str = when_created[0]
+                created_date = parse_ad_date(date_str)
+                if created_date > thirty_days_ago:
+                    stats['global']['recentlyCreated'] += 1
+            except (ValueError, TypeError):
+                pass
+
+        # Inactive Accounts (lastLogon > 90 jours)
+        last_logon = attributes.get("lastLogon", [])
+        if last_logon:
+            try:
+                last_logon_str = last_logon[0]
+                if last_logon_str != "1601-01-01 00:00:00+00:00":
+                    logon_time = parse_ad_date(last_logon_str)
+                    if logon_time and logon_time < ninety_days_ago:
+                        stats['global']['inactiveAccounts'] += 1
+            except (ValueError, TypeError):
+                pass
+
+        # Accounts never logged in (logonCount == 0)
+        logon_count = attributes.get("logonCount", [])
+        if logon_count:
+            try:
+                if int(logon_count[0]) == 0:
+                    stats['global']['neverLoggedIn'] += 1
+            except Exception:
+                pass
+        
+
+        ### UAC Statistics using UAC_FLAGS -------------------------------------------------------------------------
+        uac_values = attributes.get("userAccountControl", [])
+        if uac_values:
+            try:
+                uac_value = int(uac_values[0])
+                
+                # Security Critical
+                if uac_value & 0x0002:  # ACCOUNTDISABLE
+                    stats['uac']['disabledAccounts'] += 1
+                if uac_value & 0x400000:  # DONT_REQ_PREAUTH
+                    stats['uac']['noKerberosPreAuth'] += 1
+                if uac_value & 0x80000:  # TRUSTED_FOR_DELEGATION
+                    stats['uac']['trustedForDelegation'] += 1
+                if uac_value & 0x1000000:  # TRUSTED_TO_AUTH_FOR_DELEGATION
+                    stats['uac']['constrainedDelegation'] += 1
+                if uac_value & 0x100000:  # NOT_DELEGATED
+                    stats['uac']['notDelegated'] += 1
+                
+                # Password Related
+                if uac_value & 0x0020:  # PASSWD_NOTREQD
+                    stats['uac']['passwordNotRequired'] += 1
+                if uac_value & 0x10000:  # DONT_EXPIRE_PASSWORD
+                    stats['uac']['passwordNeverExpires'] += 1
+                if uac_value & 0x0040:  # PASSWD_CANT_CHANGE
+                    stats['uac']['passwordCantChange'] += 1
+                if uac_value & 0x800000:  # PASSWORD_EXPIRED
+                    stats['uac']['passwordExpired'] += 1
+                
+                # Authentication & Access
+                if uac_value & 0x40000:  # SMARTCARD_REQUIRED
+                    stats['uac']['smartcardRequired'] += 1
+                if uac_value & 0x0010:  # LOCKOUT
+                    stats['uac']['accountLocked'] += 1
+                if uac_value & 0x0080:  # ENCRYPTED_TEXT_PWD_ALLOWED
+                    stats['uac']['reversibleEncryption'] += 1
+                if uac_value & 0x200000:  # USE_DES_KEY_ONLY
+                    stats['uac']['useDESKey'] += 1
+                
+                # Count all UAC flags for detailed stats using UAC_FLAGS
+                for flag_value, flag_info in UAC_FLAGS.items():
+                    if uac_value & flag_value:
+                        flag_name = flag_info["name"]
+
+                        # Special case for PRE_CREATED_COMPUTER_ACCOUNT
+                        if flag_name == "PRE_CREATED_COMPUTER_ACCOUNT":
+                            # Only count if both PASSWD_NOTREQD (0x20) and WORKSTATION_TRUST_ACCOUNT (0x1000) are present
+                            if (uac_value & 0x0020) and (uac_value & 0x1000):
+                                stats['uacStats'][flag_name] = stats['uacStats'].get(flag_name, 0) + 1
+                        else:
+                            # Regular flag checking
+                            if uac_value & flag_value:
+                                stats['uacStats'][flag_name] = stats['uacStats'].get(flag_name, 0) + 1
+                        
+            except (ValueError, TypeError):
+                pass
+        
+        ### LDAP Statistics -------------------------------------------------------------------------
+        
+        # AdminCount check
+        admin_count = attributes.get("adminCount", [])
+        if admin_count:
+            try:
+                if int(admin_count[0]) == 1:
+                    stats['ldap']['adminCountUsers'] += 1
+            except (ValueError, TypeError):
+                pass
+        
+        # SPN check (Is Kerberoastable)
+        if is_kerberoastable(attributes):
+            stats['ldap']['spnUsers'] += 1
+        
+        # Constrained Delegation Target check
+        constrained_delegation = attributes.get("msDS-AllowedToDelegateTo", [])
+        if constrained_delegation and len(constrained_delegation) > 0:
+            stats['ldap']['constrainedDelegationTarget'] += 1
+            
+        # RBCD - Resource-Based Constrained Delegation check
+        rbcd_delegation = attributes.get("msDS-AllowedToActOnBehalfOfOtherIdentity", [])
+        if rbcd_delegation and len(rbcd_delegation) > 0:
+            stats['ldap']['resourceBasedConstrainedDelegation'] += 1
+        
+        ## OS Distribution + Unsupported OS stats
+        os_name = attributes.get("operatingSystem", [""])[0]
+        if os_name:
+            os_key = os_name.strip()
+            stats['osDistribution'][os_key] = stats['osDistribution'].get(os_key, 0) + 1
+            # Check for unsupported OS
+            if any(x in os_key.lower() for x in ["2000", "2003", "2008", "xp", "vista", "7", "me"]):
+                stats['ldap']['unsupportedOS'] += 1
+
+        # Has Description check
+        description = attributes.get("description", [])
+        if description and any(desc.strip() for desc in description):
+            stats['ldap']['hasDescription'] += 1
+
+
+        ### OTHER STATS -------------------------------------------------------------------------
+
+        ## Object type classification
+        object_class = attributes.get("objectClass", [])
+        if object_class:
+            # Take the most specific class (usually the last one)
+            main_class = object_class[-1] if isinstance(object_class, list) else str(object_class)
+            stats['objectTypes'][main_class] = stats['objectTypes'].get(main_class, 0) + 1
+
+        ## Group statistics
+        memberof_values = attributes.get("memberOf", [])
+        group_names = extract_group_names(memberof_values, attributes)
+        
+        for group_name in group_names:
+            stats['groups'][group_name] = stats['groups'].get(group_name, 0) + 1
+
+    return stats
+
+def render_statistics_html(stats, is_computers_file=False):
+    """
+    Render statistics as HTML for the dashboard
+    
+    Args:
+        stats (dict): Statistics dictionary from calculate_ldap_statistics
+        
+    Returns:
+        str: HTML string for the statistics dashboard
+    """
+    # Sort groups by member count (descending)
+    sorted_groups = sorted(stats['groups'].items(), key=lambda x: x[1], reverse=True)
+    
+    # Sort UAC flags by count (descending) 
+    sorted_uac_stats = sorted(stats['uacStats'].items(), key=lambda x: x[1], reverse=True)
+    
+    # Sort object types by count (descending)
+    sorted_object_types = sorted(stats['objectTypes'].items(), key=lambda x: x[1], reverse=True)
+    
+    # Generate groups HTML
+    groups_html = ""
+    if sorted_groups:
+        max_group_count = sorted_groups[0][1]
+        for group_name, count in sorted_groups:
+            width_percent = (count / max_group_count) * 100
+            groups_html += f'''
+                <div class="group-stat-item">
+                    <span class="group-name">{group_name}</span>
+                    <div class="group-bar-container">
+                        <div class="group-bar" style="width: {width_percent}%"></div>
+                        <span class="group-count">{count}</span>
+                    </div>
+                </div>'''
+    
+    # Generate UAC flags HTML
+    uac_html = ""
+    if sorted_uac_stats:
+        max_uac_count = sorted_uac_stats[0][1]
+        for flag_name, count in sorted_uac_stats:
+            width_percent = (count / max_uac_count) * 100
+            uac_html += f'''
+                <div class="uac-stat-item">
+                    <span class="uac-flag-name">{flag_name}</span>
+                    <div class="uac-bar-container">
+                        <div class="uac-bar" style="width: {width_percent}%"></div>
+                        <span class="uac-count">{count}</span>
+                    </div>
+                </div>'''
+    
+    # Generate object types HTML
+    object_types_html = ""
+    if sorted_object_types:
+        max_type_count = sorted_object_types[0][1]
+        for obj_type, count in sorted_object_types:
+            width_percent = (count / max_type_count) * 100
+            object_types_html += f'''
+                <div class="group-stat-item">
+                    <span class="group-name">{obj_type}</span>
+                    <div class="group-bar-container">
+                        <div class="group-bar" style="width: {width_percent}%"></div>
+                        <span class="group-count">{count}</span>
+                    </div>
+                </div>'''
+    
+    # Generate OS Distribution
+    os_html = ""
+    if stats['osDistribution']:
+        sorted_os = sorted(stats['osDistribution'].items(), key=lambda x: x[1], reverse=True)
+        max_os_count = sorted_os[0][1] if sorted_os else 1
+        os_html += '''
+            <div class="stats-section">
+                <h3>🖥️ Operating System Distribution</h3>
+                <div class="groups-list">
+            '''
+        
+        for os_key, count in sorted_os:
+            width_percent = (count / max_os_count) * 100
+            os_html += f'''
+                <div class="os-stat-item">
+                    <span class="os-name">{os_key}</span>
+                    <div class="os-bar-container">
+                        <div class="os-bar" style="width: {width_percent}%"></div>
+                        <span class="os-count">{count}</span>
+                    </div>
+                </div>
+            '''
+            
+        os_html += '</div></div>'
+
+    html = f'''
+        <div class="dashboard-container">
+            <div class="dashboard-header">
+                <h2>📈 LDAP Statistics Dashboard</h2>
+                <p class="dashboard-subtitle">Comprehensive analysis of LDAP directory objects</p>
+            </div>
+            
+            <div class="stats-grid">
+                <!-- Global Statistics -->
+                <div class="stats-section">
+                    <h3>🌐 Global Statistics</h3>
+                    <div class="stats-cards">
+                        <div class="stat-card total">
+                            <div class="stat-value">{stats['global']['totalObjects']}</div>
+                            <div class="stat-label">Total Objects</div>
+                        </div>
+                        <div class="stat-card info">
+                            <div class="stat-value">{stats['global']['defaultObjects']}</div>
+                            <div class="stat-label">🏛️ Default Objects (RID ≤ 1000)</div>
+                        </div>
+                        <div class="stat-card info">
+                            <div class="stat-value">{stats['global']['nonDefaultObjects']}</div>
+                            <div class="stat-label">🛠️ Non-default Objects (RID > 1000)</div>
+                        </div>
+                        <div class="stat-card info">
+                            <div class="stat-value">{stats['global']['recentlyCreated']}</div>
+                            <div class="stat-label">🕒 Recently Created (30d)</div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-value">{stats['global']['inactiveAccounts']}</div>
+                            <div class="stat-label">💤 Inactive Accounts (lastLogon>90d)</div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-value">{stats['global']['neverLoggedIn']}</div>
+                            <div class="stat-label">❌ Never Logged In (logonCount=0)</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- UAC Statistics -->
+                <div class="stats-section uac-stats-section">
+                    <h3>🛡️ UAC Statistics</h3>
+                    
+                    <!-- Security Critical Section -->
+                    <div class="uac-subsection">
+                        <h4>🚨 Security Critical</h4>
+                        <div class="uac-compact-grid">
+                            <div class="uac-compact-item warning">
+                                <span class="uac-compact-value">{stats['uac']['disabledAccounts']}</span>
+                                <span class="uac-compact-label">🚫 Account Disabled</span>
+                            </div>
+                            <div class="uac-compact-item critical">
+                                <span class="uac-compact-value">{stats['uac']['noKerberosPreAuth']}</span>
+                                <span class="uac-compact-label">🔑 No Kerberos PreAuth</span>
+                            </div>
+                            <div class="uac-compact-item critical">
+                                <span class="uac-compact-value">{stats['uac']['trustedForDelegation']}</span>
+                                <span class="uac-compact-label">🎭🚀 Unconstrained Delegation (KUD)</span>
+                            </div>
+                            <div class="uac-compact-item warning">
+                                <span class="uac-compact-value">{stats['uac']['constrainedDelegation']}</span>
+                                <span class="uac-compact-label">🎭📌 Constrained Delegation (KCD w/ Protocol Transition)</span>
+                            </div>
+                            <div class="uac-compact-item warning">
+                                <span class="uac-compact-value">{stats['uac']['notDelegated']}</span>
+                                <span class="uac-compact-label">🛡️ Cannot Be Delegated</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Password Related Section -->
+                    <div class="uac-subsection">
+                        <h4>🔐 Password Related</h4>
+                        <div class="uac-compact-grid">
+                            <div class="uac-compact-item critical">
+                                <span class="uac-compact-value">{stats['uac']['passwordNotRequired']}</span>
+                                <span class="uac-compact-label">🔓 Password Not Required</span>
+                            </div>
+                            <div class="uac-compact-item warning">
+                                <span class="uac-compact-value">{stats['uac']['passwordNeverExpires']}</span>
+                                <span class="uac-compact-label">⏰ Password Never Expires</span>
+                            </div>
+                            <div class="uac-compact-item warning">
+                                <span class="uac-compact-value">{stats['uac']['passwordCantChange']}</span>
+                                <span class="uac-compact-label">🔒 User Cannot Change Password</span>
+                            </div>
+                            <div class="uac-compact-item info">
+                                <span class="uac-compact-value">{stats['uac']['passwordExpired']}</span>
+                                <span class="uac-compact-label">⚠️ Password Expired</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Authentication & Access Section -->
+                    <div class="uac-subsection">
+                        <h4>🔑 Authentication & Access</h4>
+                        <div class="uac-compact-grid">
+                            <div class="uac-compact-item info">
+                                <span class="uac-compact-value">{stats['uac']['smartcardRequired']}</span>
+                                <span class="uac-compact-label">💳 Smartcard Required</span>
+                            </div>
+                            <div class="uac-compact-item info">
+                                <span class="uac-compact-value">{stats['uac']['accountLocked']}</span>
+                                <span class="uac-compact-label">🔐 Account Locked Out</span>
+                            </div>
+                            <div class="uac-compact-item critical">
+                                <span class="uac-compact-value">{stats['uac']['reversibleEncryption']}</span>
+                                <span class="uac-compact-label">🔐 Reversible Encryption</span>
+                            </div>
+                            <div class="uac-compact-item warning">
+                                <span class="uac-compact-value">{stats['uac']['useDESKey']}</span>
+                                <span class="uac-compact-label">🔓 Use DES Key Only</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- LDAP Statistics -->
+                <div class="stats-section">
+                    <h3>🔍 LDAP Statistics</h3>
+                    
+                    <!-- Security Critical Attributes Section -->
+                    <h4>🚨 Security Critical Attributes</h4>
+                    <div class="stats-cards">
+                        <div class="stat-card critical">
+                            <div class="stat-value">{stats['ldap']['spnUsers']}</div>
+                            <div class="stat-label">🎯 Has SPN (Kerberoastable)</div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-value">{stats['ldap']['adminCountUsers']}</div>
+                            <div class="stat-label">👑 AdminCount = 1</div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-value">{stats['ldap']['constrainedDelegationTarget']}</div>
+                            <div class="stat-label">🎭📌 Constrained Delegation (KCD w/o Protocol Transition)</div>
+                        </div>
+                        <div class="stat-card warning">
+                            <div class="stat-value">{stats['ldap']['resourceBasedConstrainedDelegation']}</div>
+                            <div class="stat-label">🎭🧩 RBCD Delegation </div>
+                        </div>
+                        {'<div class="stat-card critical"><div class="stat-value">' + str(stats['ldap']['unsupportedOS']) + '</div><div class="stat-label">🖥️ Unsupported OS</div></div>' if is_computers_file else ''}
+                    </div>
+                    
+                    <!-- Information Disclosure Section -->
+                    <h4>📝 Information Disclosure</h4>
+                    <div class="stats-cards">
+                        <div class="stat-card info">
+                            <div class="stat-value">{stats['ldap']['hasDescription']}</div>
+                            <div class="stat-label">📄 Has Description</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Object Types Distribution -->
+                <div class="stats-section groups-section">
+                    <h3>🏗️ Object Types Distribution</h3>
+                    <div class="groups-list">
+                        {object_types_html}
+                    </div>
+                </div>
+                
+                <!-- Groups Statistics -->
+                <div class="stats-section groups-section">
+                    <h3>👥 Groups Distribution ({len(sorted_groups)})</h3>
+                    <div class="groups-list">
+                        {groups_html}
+                    </div>
+                </div>
+                
+                <!-- UAC Flags Distribution -->
+                <div class="stats-section uac-section">
+                    <h3>🛡️ UAC Flags Distribution ({len(sorted_uac_stats)})</h3>
+                    <div class="uac-stats-list">
+                        {uac_html}
+                    </div>
+                </div>
+
+                <!-- OS Distribution -->
+                {os_html}
+                
+            </div>
+        </div>
+    '''
+    
+    return html
 
 # ============================================================================
 # HTML RENDERING FUNCTIONS
@@ -250,12 +805,19 @@ def format_groups_chips_html(group_names):
     if not group_names:
         return ""
     
+    privileged_groups = {
+        "Account Operators", "Administrators", "Backup Operators", "Server Operators",
+        "DnsAdmins", "Domain Admins", "Enterprise Admins", "Schema Admins",
+        "Group Policy Creator Owners", "Cert Publishers"
+    }
+    
     chips_html = '<div class="groups-chips">'
     for group_name in group_names:
         # Determine chip class based on group type
         chip_class = "group-chip"
-        if "admin" in group_name.lower() or "domain controllers" in group_name.lower():
-            chip_class += " admin-group"
+        fire_icon_html = ""
+        if group_name in privileged_groups or "admin" in group_name.lower() or "domain controllers" in group_name.lower():
+            chip_class += " privileged-group"
         elif group_name == "Users" or group_name == "Domain Users":
             chip_class += " user-group"
         elif group_name == "Remote Management Users" or group_name == "Remote Desktop Users":
@@ -263,7 +825,7 @@ def format_groups_chips_html(group_names):
         else:
             chip_class += " other-group"
             
-        chips_html += f'<span class="{chip_class}" title="{group_name}">{group_name}</span>'
+        chips_html += f'<span class="{chip_class}" title="{group_name}">{group_name} {fire_icon_html}</span>'
     
     chips_html += '</div>'
     return chips_html
@@ -290,8 +852,6 @@ def render_entry(entry: dict, index: int) -> str:
     # SPN icon HTML (can be styled via CSS)
     spn_chip_html = ''
     if kerberoastable:
-        # spn_chip_html = '<span class="group-chip spn-chip" title="Kerberoastable: Has SPN">🎯 Kerberoastable</span>'
-        # spn_chip_html = '<span class="" title="Kerberoastable: Has SPN">🎯</span>'
         spn_chip_html = '<span class="spn-chip" title="Kerberoastable: Has SPN">🎯</span>'
 
     # Extract and format groups
@@ -398,7 +958,7 @@ def render_table(data: list, keys: list) -> str:
 # ============================================================================
 # Core function that orchestrates the HTML generation process
 
-def is_users_file(input_file):
+def is_users_file(input_file) -> bool:
     """
     Determine if the file contains user objects
     
@@ -412,6 +972,24 @@ def is_users_file(input_file):
     # Check filename first
     filename = os.path.basename(input_file).lower()
     if 'users' in filename:
+        return True
+    else:
+        return False
+    
+def is_computers_file(input_file) -> bool:
+    """
+    Determine if the file contains computer objects
+
+    Args:
+        input_file (str): Path to the input file
+        data (list): LDAP data entries
+        
+    Returns:
+        bool: True if file contains users, False otherwise
+    """
+    # Check filename first
+    filename = os.path.basename(input_file).lower()
+    if 'computer' in filename:
         return True
     else:
         return False
@@ -457,6 +1035,10 @@ def main(input_file):
     # Generate HTML content for table view
     keys = gather_all_keys(data)
     table_html = render_table(data, keys)
+    
+    # Calculate statistics and generate stats HTML
+    stats = calculate_ldap_statistics(data)
+    stats_html = render_statistics_html(stats, is_computers_file=is_computers_file(input_file))
 
     # Load frontend template and assets
     with open(template_file, "r", encoding="utf-8") as f:
@@ -475,6 +1057,7 @@ def main(input_file):
     full_html = template.format(
         detail_content=detail_html,
         table_content=table_html,
+        stats_content=stats_html,
         filename=os.path.basename(input_file),
         style_content=style_content,
         script_content=script_content
@@ -498,7 +1081,7 @@ logo_ascii = r"""
 
 if __name__ == "__main__":
     print(logo_ascii)
-    print("LDAPViewer v2.7 - by NathanielSlw\n")
+    print("LDAPViewer v3.0 - by NathanielSlw\n")
     
     parser = argparse.ArgumentParser(
         description='Generates an interactive HTML interface to explore ldapdomaindump JSON files.',

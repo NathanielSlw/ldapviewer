@@ -51,9 +51,12 @@
             <button onclick="switchView('table')">
                 📊 Table View
             </button>
-            <button onclick="exportCSV()">
-                💾 Export to CSV
+            <button onclick="switchView('stats')">
+                📈 Statistics
             </button>
+            <!-- <button onclick="exportCSV()">
+                💾 Export to CSV
+            </button> -->
         </div>
         
         <!-- Sub-menu to expand/collapse -->
@@ -61,6 +64,13 @@
             <button id="expandBtn" onclick="toggleAll(true)">Expand All</button>
             <button id="collapseBtn" onclick="toggleAll(false)">Collapse All</button>
             <button id="groupByBtn" onclick="toggleUsersByGroups()">👥 Users by Group</button>
+        </div>
+
+        <!-- Table-specific buttons (only shown in table view) -->
+        <div class="sub-menu" id="tableButtons" style="display: none;">
+            <button id="exportBtn" onclick="exportCSV()">
+                💾 Export to CSV
+            </button>
         </div>
         
         <!-- Search bar -->
@@ -101,14 +111,17 @@
                                     <button class="filter-chip" data-value="2" data-name="DISABLED" onclick="toggleFilterChip(this, 'uac')">
                                         🚫 Account Disabled
                                     </button>
+                                    <button class="filter-chip" data-value="2" data-name="ENABLED" data-inverse="true" onclick="toggleFilterChip(this, 'uac')">
+                                        ✅ Account Enabled
+                                    </button>
                                     <button class="filter-chip" data-value="4194304" data-name="DONT_REQUIRE_PREAUTH" onclick="toggleFilterChip(this, 'uac')">
-                                        🔑 No Kerberos PreAuth
+                                        🔑 No Kerberos PreAuth (ASREProastable)
                                     </button>
                                     <button class="filter-chip" data-value="524288" data-name="TRUSTED_FOR_DELEGATION" onclick="toggleFilterChip(this, 'uac')">
-                                        🎯 Unconstrained Delegation
+                                        🎭🚀 Unconstrained (KUD)
                                     </button>
                                     <button class="filter-chip" data-value="16777216" data-name="TRUSTED_TO_AUTH_FOR_DELEGATION" onclick="toggleFilterChip(this, 'uac')">
-                                        🔐 Constrained Delegation
+                                        🎭📌 Constrained (KCD w/ Protocol Transition)
                                     </button>
                                     <button class="filter-chip" data-value="1048576" data-name="NOT_DELEGATED" onclick="toggleFilterChip(this, 'uac')">
                                         🛡️ Cannot Be Delegated
@@ -161,11 +174,17 @@
                                     <button class="filter-chip" data-attribute="servicePrincipalName" onclick="toggleFilterChip(this, 'ldap')">
                                         🎯 Has SPN (Kerberoastable)
                                     </button>
-                                    <button class="filter-chip" data-attribute="msDS-AllowedToDelegateTo" onclick="toggleFilterChip(this, 'ldap')">
-                                        🔐 Constrained Delegation Target
-                                    </button>
                                     <button class="filter-chip" data-attribute="adminCount" data-value="1" onclick="toggleFilterChip(this, 'ldap')">
                                         👑 AdminCount = 1
+                                    </button>
+                                    <button class="filter-chip" data-attribute="msDS-AllowedToDelegateTo" onclick="toggleFilterChip(this, 'ldap')">
+                                        🎭📌 Constrained (KCD w/o Protocol Transition)
+                                    </button>
+                                    <button class="filter-chip" data-attribute="msDS-AllowedToActOnBehalfOfOtherIdentity" onclick="toggleFilterChip(this, 'ldap')">
+                                        🎭🧩 RBCD Delegation
+                                    </button>
+                                    <button class="filter-chip" id="unsupportedOSChip" onclick="toggleUnsupportedOSFilter(this)">
+                                        🖥️ Unsupported OS
                                     </button>
                                 </div>
                             </div>
@@ -191,9 +210,30 @@
                                     <button class="filter-chip" id="defaultOnlyChip" onclick="toggleGeneralFilter(this, 'default')">
                                         🏛️ Default objects only
                                     </button>
+                                    <button class="filter-chip" id="recentlyCreatedChip" onclick="toggleGeneralFilter(this, 'recentlyCreated')">
+                                        🕒 Recently Created (30d)
+                                    </button>
+                                    <button class="filter-chip" id="inactiveAccountsChip" onclick="toggleGeneralFilter(this, 'inactiveAccounts')">
+                                        💤 Inactive Accounts (lastLogon&gt;90d)
+                                    </button>
+                                    <button class="filter-chip" id="neverLoggedInChip" onclick="toggleGeneralFilter(this, 'neverLoggedIn')">
+                                        ❌ Never Logged In (logonCount=0)
+                                    </button>
                                 </div>
                             </div>
-                        </div>
+
+                            <div class="filter-chips-section">
+                                <h6>👑 Owned Objects</h6>
+                                <div class="filter-chips">
+                                    <button class="filter-chip" onclick="toggleGeneralFilter(this, 'owned')">
+                                        👑 Owned Objects
+                                    </button>
+                                    <button class="filter-chip" onclick="toggleGeneralFilter(this, 'nonowned')">
+                                        🚫 Non-Owned Objects
+                                    </button>
+                                </div>
+                            </div>
+                        </div>        
                     </div>
                     
                     <div class="filter-actions">
@@ -214,6 +254,9 @@
     </div>
     <div id="tableView" class="hidden">
         {table_content}
+    </div>
+    <div id="statsView" class="hidden"> 
+       {stats_content}
     </div>
 </body>
 </html>
