@@ -994,6 +994,238 @@ def is_computers_file(input_file) -> bool:
     else:
         return False
 
+def is_policy_file(input_file) -> bool:
+    """
+    Determine if the file contains domain policy objects
+    
+    Args:
+        input_file (str): Path to the input file
+        
+    Returns:
+        bool: True if file contains policy, False otherwise
+    """
+    filename = os.path.basename(input_file).lower()
+    if 'policy' in filename:
+        return True
+    return False
+
+def render_policy_report(data, input_file):
+    """
+    Render a specific report for domain policy
+    """
+    output_file = "ldapviewer_" + os.path.splitext(os.path.basename(input_file))[0] + ".html"
+    filename = os.path.basename(input_file)
+    
+    # Helper for duration formatting
+    def format_duration(duration_str):
+        if not duration_str or duration_str == "-":
+            return duration_str
+        
+        # Handle "days" format (e.g. "42 days, 0:00:00")
+        if "day" in duration_str:
+            parts = duration_str.split(',')
+            days_part = parts[0].strip()
+            time_part = parts[1].strip() if len(parts) > 1 else "0:00:00"
+        else:
+            days_part = ""
+            time_part = duration_str.strip()
+            
+        try:
+            # Parse time part HH:MM:SS
+            if ':' in time_part:
+                time_part = time_part.split('.')[0] # Remove microseconds if present
+                h, m, s = map(int, time_part.split(':'))
+            else:
+                h, m, s = 0, 0, 0
+                
+            result = []
+            if days_part:
+                result.append(days_part)
+                
+            if h > 0:
+                result.append(f"{h} hour{'s' if h != 1 else ''}")
+            if m > 0:
+                result.append(f"{m} minute{'s' if m != 1 else ''}")
+            if s > 0:
+                result.append(f"{s} second{'s' if s != 1 else ''}")
+                
+            if not result:
+                return "0 seconds"
+                
+            return ", ".join(result)
+        except:
+            return duration_str
+
+    # Helper for pwdProperties decoding
+    def decode_pwd_properties(val_list):
+        if not val_list:
+            return "-"
+        try:
+            val = int(val_list[0])
+        except:
+            return str(val_list[0])
+            
+        flags = []
+        if val & 1: flags.append("DOMAIN_PASSWORD_COMPLEX")
+        if val & 2: flags.append("DOMAIN_PASSWORD_NO_ANON_CHANGE")
+        if val & 4: flags.append("DOMAIN_PASSWORD_NO_CLEAR_CHANGE")
+        if val & 8: flags.append("DOMAIN_LOCKOUT_ADMINS")
+        if val & 16: flags.append("DOMAIN_PASSWORD_STORE_CLEARTEXT")
+        if val & 32: flags.append("DOMAIN_REFUSE_PASSWORD_CHANGE")
+        
+        if not flags:
+            return str(val)
+            
+        return "<br>".join(flags)
+
+    # Load styles from frontend/style.css
+    base_dir = os.path.dirname(os.path.realpath(__file__))
+    style_file = os.path.join(base_dir, "frontend", "style.css")
+    try:
+        with open(style_file, "r", encoding="utf-8") as f:
+            style_content = f.read()
+    except:
+        style_content = ""
+    
+    content_html = ""
+    
+    # Define fields and their formatters
+    policy_fields = [
+        ("Distinguished Name", "distinguishedName", None),
+        ("Lockout Observation Window", "lockOutObservationWindow", format_duration),
+        ("Lockout Duration", "lockoutDuration", format_duration),
+        ("Lockout Threshold", "lockoutThreshold", None),
+        ("Max Password Age", "maxPwdAge", format_duration),
+        ("Min Password Age", "minPwdAge", format_duration),
+        ("Min Password Length", "minPwdLength", None),
+        ("Password History Length", "pwdHistoryLength", None),
+        ("Password Properties", "pwdProperties", decode_pwd_properties),
+        ("Machine Account Quota", "ms-DS-MachineAccountQuota", None)
+    ]
+
+    for entry in data:
+        attributes = entry.get("attributes", {})
+        dn = entry.get("dn", "")
+        display_name = extract_display_name(attributes, dn)
+        
+        entry_html = f'''
+        <div class="policy-card">
+            <div class="policy-header">
+                <h2>🛡️ Domain Policy: {display_name}</h2>
+            </div>
+            <table class="policy-table">
+        '''
+        
+        for label, key, formatter in policy_fields:
+            values = attributes.get(key, [])
+            
+            if key == "pwdProperties":
+                # Special handling for pwdProperties which needs the list/int
+                val_str = formatter(values)
+            else:
+                if values:
+                    raw_val = str(values[0])
+                    if formatter:
+                        val_str = formatter(raw_val)
+                    else:
+                        val_str = ', '.join(map(str, values))
+                else:
+                    val_str = "-"
+            
+            entry_html += f"<tr><td class='policy-key'>{label}</td><td class='policy-value'>{val_str}</td></tr>\n"
+            
+        entry_html += "</table>\n</div>\n"
+        content_html += entry_html
+
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LDAP Viewer - {filename}</title>
+    <style>
+        {style_content}
+        
+        /* Overrides for Policy Report */
+        body {{
+            padding: 40px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }}
+        
+        .header-container {{
+            margin-bottom: 30px;
+            border-bottom: 2px solid var(--border-light);
+            padding-bottom: 20px;
+        }}
+        
+        .policy-card {{
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            box-shadow: var(--shadow-medium);
+            border: 1px solid var(--border-light);
+            overflow: hidden;
+            margin-bottom: 30px;
+        }}
+        
+        .policy-header {{
+            background: var(--accent-secondary);
+            padding: 15px 25px;
+            color: white;
+        }}
+        
+        .policy-header h2 {{
+            margin: 0;
+            font-size: 18px;
+            color: white;
+        }}
+        
+        .policy-table {{
+            width: 100%;
+            border-collapse: collapse;
+        }}
+        
+        .policy-table td {{
+            padding: 12px 25px;
+            border-bottom: 1px solid var(--border-light);
+            color: var(--text-primary);
+        }}
+        
+        .policy-table tr:last-child td {{
+            border-bottom: none;
+        }}
+        
+        .policy-key {{
+            font-weight: 600;
+            color: var(--text-secondary);
+            width: 35%;
+            background-color: var(--bg-tertiary);
+        }}
+        
+        .policy-value {{
+            font-family: 'Consolas', monospace;
+        }}
+        
+        .footer {{
+            text-align: center;
+            margin-top: 50px;
+            color: var(--text-muted);
+            font-size: 12px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header-container">
+        <h1>LDAP Viewer <span style="font-size: 0.6em; opacity: 0.7; font-weight: normal;">- {filename}</span></h1>
+    </div>
+
+    {content_html}
+</body>
+</html>'''
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"[+] Interactive HTML interface generated: {output_file}")
+
 def main(input_file):
     """
     Main function that processes a JSON LDAP dump and generates an HTML viewer
@@ -1024,6 +1256,11 @@ def main(input_file):
 
     print(f"Processing {len(data)} entries from '{input_file}'")
     
+    # Check if this is a policy file
+    if is_policy_file(input_file):
+        render_policy_report(data, input_file)
+        return
+
     # Check if this is a users file
     is_users = is_users_file(input_file)
 
