@@ -4,6 +4,7 @@ import json
 import sys
 import os
 import argparse
+import base64
 
 # ============================================================================
 # UAC FLAGS DEFINITION
@@ -1009,6 +1010,21 @@ def is_policy_file(input_file) -> bool:
         return True
     return False
 
+def is_trusts_file(input_file) -> bool:
+    """
+    Determine if the file contains domain trust objects
+    
+    Args:
+        input_file (str): Path to the input file
+        
+    Returns:
+        bool: True if file contains trusts, False otherwise
+    """
+    filename = os.path.basename(input_file).lower()
+    if 'trust' in filename:
+        return True
+    return False
+
 def render_policy_report(data, input_file):
     """
     Render a specific report for domain policy
@@ -1141,7 +1157,7 @@ def render_policy_report(data, input_file):
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>LDAP Viewer - {filename}</title>
+    <title>LDAP Policy Viewer - {filename}</title>
     <style>
         {style_content}
         
@@ -1226,6 +1242,265 @@ def render_policy_report(data, input_file):
         f.write(html)
     print(f"[+] Interactive HTML interface generated: {output_file}")
 
+def render_trusts_report(data, input_file):
+    """
+    Render a specific report for domain trusts
+    """
+    output_file = "ldapviewer_" + os.path.splitext(os.path.basename(input_file))[0] + ".html"
+    filename = os.path.basename(input_file)
+    
+    # Helpers for decoding
+    def decode_trust_direction(val_list):
+        if not val_list: return "-"
+        try:
+            val = int(val_list[0])
+        except: return str(val_list[0])
+        
+        mapping = {
+            0: "TRUST_DIRECTION_DISABLED",
+            1: "TRUST_DIRECTION_INBOUND",
+            2: "TRUST_DIRECTION_OUTBOUND",
+            3: "TRUST_DIRECTION_BIDIRECTIONAL"
+        }
+        
+        return mapping.get(val, f"Unknown ({val})")
+
+    def decode_trust_type(val_list):
+        if not val_list: return "-"
+        try:
+            val = int(val_list[0])
+        except: return str(val_list[0])
+        
+        mapping = {
+            1: ("TRUST_TYPE_DOWNLEVEL", "The trusted domain is a Windows domain not running AD"),
+            2: ("TRUST_TYPE_UPLEVEL", "The trusted domain is a Windows domain running AD"),
+            3: ("TRUST_TYPE_MIT", "The trusted domain is a Non-Windows with Kerberos"),
+            4: ("TRUST_TYPE_DCE", "Not used"),
+            5: ("TRUST_TYPE_AAD", "The trusted domain is in Azure Active Directory")
+        }
+        
+        if val in mapping:
+            const_name, desc = mapping[val]
+            return f"{const_name} ({desc})"
+        return f"Unknown ({val})"
+
+    def decode_trust_attributes(val_list):
+        if not val_list: return "-"
+        try:
+            val = int(val_list[0])
+        except: return str(val_list[0])
+        
+        flags_map = {
+            1: ("TRUST_ATTRIBUTE_NON_TRANSITIVE", "Trust is not transitive"),
+            2: ("TRUST_ATTRIBUTE_UPLEVEL_ONLY", "Only Windows 2000 and newer operating systems can use the trust"),
+            4: ("TRUST_ATTRIBUTE_QUARANTINED_DOMAIN", "Domain is quarantined and subject to SID filtering"),
+            8: ("TRUST_ATTRIBUTE_FOREST_TRANSITIVE", "Cross forest trust between forests"),
+            16: ("TRUST_ATTRIBUTE_CROSS_ORGANIZATION", "Domain or forest is not part of the organization"),
+            32: ("TRUST_ATTRIBUTE_WITHIN_FOREST", "Trusted domain is in the same forest"),
+            64: ("TRUST_ATTRIBUTE_TREAT_AS_EXTERNAL", "Trust is treated as an external trust for SID filtering"),
+            128: ("TRUST_ATTRIBUTE_USES_RC4_ENCRYPTION", "Set when trustType is TRUST_TYPE_MIT, which can use RC4 keys"),
+            256: ("TRUST_ATTRIBUTE_TRUST_USES_AES_KEYS", "Trust uses AES keys"),
+            512: ("TRUST_ATTRIBUTE_CROSS_ORGANIZATION_NO_TGT_DELEGATION", "Tickets under this trust are not trusted for delegation"),
+            1024: ("TRUST_ATTRIBUTE_PIM_TRUST", "Cross-forest trust to a domain is treated as Privileged Identity Management (PIM) trust for the purposes of SID filtering"),
+            2048: ("TRUST_ATTRIBUTE_CROSS_ORGANIZATION_ENABLE_TGT_DELEGATION", "Tickets under this trust are trusted for delegation")
+        }
+        
+        active_flags = []
+        for bit, (const_name, desc) in flags_map.items():
+            if val & bit:
+                active_flags.append(f"{const_name} ({desc})")
+        
+        if not active_flags:
+            return str(val) if val != 0 else "-"
+            
+        html = '<div style="display: flex; flex-direction: column; gap: 4px;">'
+        for f in active_flags:
+            html += f'<span>{f}</span>'
+        html += '</div>'
+        return html
+
+    def decode_security_identifier(val_list):
+        if not val_list: return "-"
+        val = val_list[0]
+        
+        # Handle dictionary format from ldapdomaindump
+        if isinstance(val, dict) and val.get('encoding') == 'base64':
+            try:
+                encoded_data = val.get('encoded', '')
+                binary_data = base64.b64decode(encoded_data)
+                
+                revision = binary_data[0]
+                sub_authority_count = binary_data[1]
+                identifier_authority = int.from_bytes(binary_data[2:8], byteorder='big')
+                
+                sub_authorities = []
+                for i in range(sub_authority_count):
+                    start = 8 + (i * 4)
+                    end = start + 4
+                    sub_authorities.append(int.from_bytes(binary_data[start:end], byteorder='little'))
+                
+                return f"S-{revision}-{identifier_authority}-" + "-".join(map(str, sub_authorities))
+            except Exception:
+                return str(val)
+        return str(val)
+
+    # Load styles
+    base_dir = os.path.dirname(os.path.realpath(__file__))
+    style_file = os.path.join(base_dir, "frontend", "style.css")
+    try:
+        with open(style_file, "r", encoding="utf-8") as f:
+            style_content = f.read()
+    except:
+        style_content = ""
+        
+    # Extract current domain from the first entry's DN
+    current_domain = "Unknown"
+    if data:
+        for entry in data:
+            dn = entry.get("dn", "")
+            if "DC=" in dn.upper():
+                parts = dn.split(',')
+                dc_parts = [p.strip()[3:] for p in parts if p.strip().upper().startswith('DC=')]
+                if dc_parts:
+                    current_domain = '.'.join(dc_parts)
+                    break
+
+    content_html = ""
+    
+    # Fields to display
+    fields = [
+        ("CN", "cn", None),
+        ("NETBIOS Domain name", "flatName", None),
+        ("Security Identifier", "securityIdentifier", decode_security_identifier),
+        ("Trust Attributes", "trustAttributes", decode_trust_attributes),
+        ("Trust Direction", "trustDirection", decode_trust_direction),
+        ("Trust Type", "trustType", decode_trust_type)
+    ]
+    
+    for entry in data:
+        attributes = entry.get("attributes", {})
+        dn = entry.get("dn", "")
+        display_name = extract_display_name(attributes, dn)
+        
+        entry_html = f'''
+        <div class="policy-card">
+            <div class="policy-header">
+                <h2>🤝 Domain Trust: {display_name}</h2>
+            </div>
+            <table class="policy-table">
+        '''
+        
+        for label, key, formatter in fields:
+            values = attributes.get(key, [])
+            
+            if formatter:
+                val_str = formatter(values)
+            else:
+                if values:
+                    val_str = ', '.join(map(str, values))
+                else:
+                    val_str = "-"
+            
+            entry_html += f"<tr><td class='policy-key'>{label}</td><td class='policy-value'>{val_str}</td></tr>\n"
+            
+        entry_html += "</table>\n</div>\n"
+        content_html += entry_html
+
+    # Reusing policy report styles with overrides
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LDAP Trusts Viewer - {filename}</title>
+    <style>
+        {style_content}
+        
+        /* Overrides for Trust Report */
+        body {{
+            padding: 40px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }}
+        
+        .header-container {{
+            margin-bottom: 30px;
+            border-bottom: 2px solid var(--border-light);
+            padding-bottom: 20px;
+        }}
+        
+        .policy-card {{
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            box-shadow: var(--shadow-medium);
+            border: 1px solid var(--border-light);
+            overflow: hidden;
+            margin-bottom: 30px;
+        }}
+        
+        .policy-header {{
+            background: var(--accent-secondary);
+            padding: 15px 25px;
+            color: white;
+        }}
+        
+        .policy-header h2 {{
+            margin: 0;
+            font-size: 18px;
+            color: white;
+        }}
+        
+        .policy-table {{
+            width: 100%;
+            border-collapse: collapse;
+        }}
+        
+        .policy-table td {{
+            padding: 12px 25px;
+            border-bottom: 1px solid var(--border-light);
+            color: var(--text-primary);
+        }}
+        
+        .policy-table tr:last-child td {{
+            border-bottom: none;
+        }}
+        
+        .policy-key {{
+            font-weight: 600;
+            color: var(--text-secondary);
+            width: 35%;
+            background-color: var(--bg-tertiary);
+        }}
+        
+        .policy-value {{
+            font-family: 'Consolas', monospace;
+        }}
+        
+        .trust-container {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        
+        .trust-value {{
+            font-weight: bold;
+            margin-right: 10px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header-container">
+        <h1>LDAP Viewer <span style="font-size: 0.6em; opacity: 0.7; font-weight: normal;">- {filename}</span></h1>
+        <h3 style="margin: 5px 0 0 0; color: var(--text-secondary); font-weight: normal;">Current Domain: <strong>{current_domain}</strong></h3>
+    </div>
+
+    {content_html}
+</body>
+</html>'''
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"[+] Interactive HTML interface generated: {output_file}")
+
 def main(input_file):
     """
     Main function that processes a JSON LDAP dump and generates an HTML viewer
@@ -1261,8 +1536,24 @@ def main(input_file):
         render_policy_report(data, input_file)
         return
 
+    # Check if this is a trusts file
+    if is_trusts_file(input_file):
+        render_trusts_report(data, input_file)
+        return
+
     # Check if this is a users file
     is_users = is_users_file(input_file)
+
+    # Determine page title based on file type
+    filename = os.path.basename(input_file)
+    if is_users:
+        page_title = f"LDAP Users Viewer - {filename}"
+    elif is_computers_file(input_file):
+        page_title = f"LDAP Computers Viewer - {filename}"
+    elif 'group' in filename.lower():
+        page_title = f"LDAP Groups Viewer - {filename}"
+    else:
+        page_title = f"LDAP Viewer - {filename}"
 
     # Generate HTML content for detail view
     detail_html = ""
@@ -1296,6 +1587,7 @@ def main(input_file):
         table_content=table_html,
         stats_content=stats_html,
         filename=os.path.basename(input_file),
+        page_title=page_title,
         style_content=style_content,
         script_content=script_content
     )
@@ -1318,7 +1610,7 @@ logo_ascii = r"""
 
 if __name__ == "__main__":
     print(logo_ascii)
-    print("LDAPViewer v3.0 - by NathanielSlw\n")
+    print("LDAPViewer v3.1 - by NathanielSlw\n")
     
     parser = argparse.ArgumentParser(
         description='Generates an interactive HTML interface to explore ldapdomaindump JSON files.',
