@@ -152,9 +152,7 @@ See the [project roadmap](https://github.com/users/NathanielSlw/projects/2) for 
 
 ![Statistics General](screenshots/statistics1.png)
 
-![Statistics UAC](screenshots/statistics2.png)
-
-![Statistics LDAP](screenshots/statistics3.png)
+![Statistics Groups and UAC](screenshots/statistics2.png)
 
 ### Filters
 
