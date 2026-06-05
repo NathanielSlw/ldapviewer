@@ -558,7 +558,7 @@ function applyFiltersToTableView() {
     const ths = document.querySelectorAll("#tableView thead th");
     
     // Find column indices once
-    const objectSIDIndex = Array.from(ths).findIndex(th => th.textContent === "objectSid");
+    const objectSIDIndex = Array.from(ths).findIndex(th => th.textContent === "RID");
     const uacIndex = Array.from(ths).findIndex(th => th.textContent === "userAccountControl");
     
     const whenCreatedIndex = Array.from(ths).findIndex(th => th.textContent === "whenCreated");
@@ -601,12 +601,19 @@ function applyFiltersToTableView() {
                     let rid = null;
                     if (objectSIDIndex !== -1) {
                         const cell = row.cells[objectSIDIndex];
-                        rid = getRIDFromObjectSID(cell ? cell.textContent : "");
+                        const parsed = parseInt(cell ? cell.textContent.trim() : "", 10);
+                        if (!isNaN(parsed)) rid = parsed;
                     }
                     if (type === 'default') shouldShow = rid !== null && rid <= 1000;
                     if (type === 'nonDefault') shouldShow = rid !== null && rid > 1000;
                     break;
                 }
+                case 'owned':
+                    shouldShow = row.classList.contains('owned');
+                    break;
+                case 'nonowned':
+                    shouldShow = !row.classList.contains('owned');
+                    break;
                 case 'recentlyCreated': {
                     let whenCreated = null;
                     if (whenCreatedIndex !== -1) {
@@ -1125,31 +1132,48 @@ function updateContextMenuContent(entry) {
     });
 }
 
+function getEntryId(entry) {
+    // Works for both .entry (detail view) and <tr data-attr-id> (table view)
+    const attrEl = entry.querySelector('.attributes');
+    if (attrEl) return attrEl.id;
+    return entry.dataset.attrId || null;
+}
+
+function syncOwnedClass(id, owned) {
+    // Sync between detail view and table row
+    const attrEl = document.getElementById(id);
+    if (attrEl) {
+        const detailEntry = attrEl.closest('.entry');
+        if (detailEntry) detailEntry.classList.toggle('owned', owned);
+    }
+    const tableRow = document.querySelector(`#tableView tr[data-attr-id="${id}"]`);
+    if (tableRow) tableRow.classList.toggle('owned', owned);
+}
+
 function toggleOwned(entry) {
     entry.classList.toggle('owned');
-    // Save the state in localStorage
-    const entryId = entry.querySelector('.attributes').id;
+    const entryId = getEntryId(entry);
+    const isOwned = entry.classList.contains('owned');
+
+    // Sync the other view
+    if (entryId) syncOwnedClass(entryId, isOwned);
+
     const ownedEntries = JSON.parse(localStorage.getItem('ownedEntries') || '[]');
-    
-    if (entry.classList.contains('owned')) {
-        if (!ownedEntries.includes(entryId)) {
-            ownedEntries.push(entryId);
-        }
+    if (isOwned) {
+        if (!ownedEntries.includes(entryId)) ownedEntries.push(entryId);
     } else {
         const index = ownedEntries.indexOf(entryId);
-        if (index > -1) {
-            ownedEntries.splice(index, 1);
-        }
+        if (index > -1) ownedEntries.splice(index, 1);
     }
-    
     localStorage.setItem('ownedEntries', JSON.stringify(ownedEntries));
 }
 
 function toggleHighValue(entry) {
     entry.classList.toggle('high-value-target');
-    
-    // Gérer le badge
+
+    // Badge only applies in detail view
     const h2 = entry.querySelector('h2');
+    if (!h2) return;
     let badge = h2.querySelector('.high-value-badge');
     
     if (entry.classList.contains('high-value-target')) {
@@ -1181,37 +1205,28 @@ function toggleHighValue(entry) {
     localStorage.setItem('highValueEntries', JSON.stringify(highValueEntries));
 }
 
-// Right click event listener on entry elements
+// Right click event listener on entry elements (detail view) and table rows
 document.addEventListener('contextmenu', function(e) {
-    const entry = e.target.closest('.entry');
+    const entry = e.target.closest('.entry') || e.target.closest('#tableView tbody tr');
     if (entry) {
         e.preventDefault();
         updateContextMenuContent(entry);
-        
+
         // Position the context menu
         contextMenu.style.display = 'block';
-        
-        // Use clientX/clientY for fixed positioning (relative to viewport)
+
         let x = e.clientX;
         let y = e.clientY;
-        
-        // Get menu dimensions after making it visible
+
         const menuRect = contextMenu.getBoundingClientRect();
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
-        
-        // Adjust position if menu would go outside viewport
-        if (x + menuRect.width > viewportWidth) {
-            x = viewportWidth - menuRect.width - 10;
-        }
-        if (y + menuRect.height > viewportHeight) {
-            y = viewportHeight - menuRect.height - 10;
-        }
-        
-        // Ensure minimum distance from edges
+
+        if (x + menuRect.width > viewportWidth) x = viewportWidth - menuRect.width - 10;
+        if (y + menuRect.height > viewportHeight) y = viewportHeight - menuRect.height - 10;
         x = Math.max(10, x);
         y = Math.max(10, y);
-        
+
         contextMenu.style.left = x + 'px';
         contextMenu.style.top = y + 'px';
         contextMenu.targetEntry = entry;
@@ -1222,10 +1237,7 @@ document.addEventListener('contextmenu', function(e) {
 function restoreOwnedEntries() {
     const ownedEntries = JSON.parse(localStorage.getItem('ownedEntries') || '[]');
     ownedEntries.forEach(id => {
-        const entry = document.querySelector(`#${id}`);
-        if (entry) {
-            entry.closest('.entry').classList.add('owned');
-        }
+        syncOwnedClass(id, true);
     });
 }
 

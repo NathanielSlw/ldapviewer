@@ -5,6 +5,7 @@ import sys
 import os
 import argparse
 import base64
+from datetime import datetime
 
 # ============================================================================
 # UAC FLAGS DEFINITION
@@ -514,278 +515,182 @@ def calculate_ldap_statistics(data):
     return stats
 
 def render_statistics_html(stats, is_computers_file=False):
-    """
-    Render statistics as HTML for the dashboard
-    
-    Args:
-        stats (dict): Statistics dictionary from calculate_ldap_statistics
-        
-    Returns:
-        str: HTML string for the statistics dashboard
-    """
-    # Sort groups by member count (descending)
-    sorted_groups = sorted(stats['groups'].items(), key=lambda x: x[1], reverse=True)
-    
-    # Sort UAC flags by count (descending) 
+    total_objects = stats['global']['totalObjects'] or 1
+    u = stats['uac']
+    l = stats['ldap']
+    g = stats['global']
+
+    sorted_groups    = sorted(stats['groups'].items(),   key=lambda x: x[1], reverse=True)
     sorted_uac_stats = sorted(stats['uacStats'].items(), key=lambda x: x[1], reverse=True)
-    
-    # Sort object types by count (descending)
-    sorted_object_types = sorted(stats['objectTypes'].items(), key=lambda x: x[1], reverse=True)
-    
-    # Generate groups HTML
-    groups_html = ""
-    if sorted_groups:
-        max_group_count = sorted_groups[0][1]
-        for group_name, count in sorted_groups:
-            width_percent = (count / max_group_count) * 100
-            groups_html += f'''
-                <div class="group-stat-item">
-                    <span class="group-name">{group_name}</span>
-                    <div class="group-bar-container">
-                        <div class="group-bar" style="width: {width_percent}%"></div>
-                        <span class="group-count">{count}</span>
-                    </div>
+
+    # ---- Distribution bar helper ----
+    def dist_rows(items, max_val, bar_class):
+        out = ""
+        for name, count in items:
+            w   = round((count / max_val) * 100, 1) if max_val else 0
+            pct = round(count / total_objects * 100, 1)
+            out += f'''
+                <div class="dist-row">
+                    <span class="dist-label" title="{name}">{name}</span>
+                    <div class="dist-bar-wrap"><div class="dist-bar {bar_class}" style="width:{w}%"></div></div>
+                    <span class="dist-count">{count}<span class="bar-pct"> {pct}%</span></span>
                 </div>'''
-    
-    # Generate UAC flags HTML
-    uac_html = ""
-    if sorted_uac_stats:
-        max_uac_count = sorted_uac_stats[0][1]
-        for flag_name, count in sorted_uac_stats:
-            width_percent = (count / max_uac_count) * 100
-            uac_html += f'''
-                <div class="uac-stat-item">
-                    <span class="uac-flag-name">{flag_name}</span>
-                    <div class="uac-bar-container">
-                        <div class="uac-bar" style="width: {width_percent}%"></div>
-                        <span class="uac-count">{count}</span>
-                    </div>
-                </div>'''
-    
-    # Generate object types HTML
-    object_types_html = ""
-    if sorted_object_types:
-        max_type_count = sorted_object_types[0][1]
-        for obj_type, count in sorted_object_types:
-            width_percent = (count / max_type_count) * 100
-            object_types_html += f'''
-                <div class="group-stat-item">
-                    <span class="group-name">{obj_type}</span>
-                    <div class="group-bar-container">
-                        <div class="group-bar" style="width: {width_percent}%"></div>
-                        <span class="group-count">{count}</span>
-                    </div>
-                </div>'''
-    
-    # Generate OS Distribution
-    os_html = ""
+        return out
+
+    groups_html    = dist_rows(sorted_groups,    sorted_groups[0][1]    if sorted_groups    else 1, "accent")   if sorted_groups    else ""
+    uac_flags_html = dist_rows(sorted_uac_stats, sorted_uac_stats[0][1] if sorted_uac_stats else 1, "security") if sorted_uac_stats else ""
+
+    os_section_html = ""
     if stats['osDistribution']:
-        sorted_os = sorted(stats['osDistribution'].items(), key=lambda x: x[1], reverse=True)
-        max_os_count = sorted_os[0][1] if sorted_os else 1
-        os_html += '''
+        sorted_os     = sorted(stats['osDistribution'].items(), key=lambda x: x[1], reverse=True)
+        os_items_html = dist_rows(sorted_os, sorted_os[0][1] if sorted_os else 1, "success")
+        os_section_html = f'''
             <div class="stats-section">
-                <h3>🖥️ Operating System Distribution</h3>
-                <div class="groups-list">
-            '''
-        
-        for os_key, count in sorted_os:
-            width_percent = (count / max_os_count) * 100
-            os_html += f'''
-                <div class="os-stat-item">
-                    <span class="os-name">{os_key}</span>
-                    <div class="os-bar-container">
-                        <div class="os-bar" style="width: {width_percent}%"></div>
-                        <span class="os-count">{count}</span>
-                    </div>
-                </div>
-            '''
-            
-        os_html += '</div></div>'
+                <h3>🖥️ OS Distribution</h3>
+                <div class="dist-list">{os_items_html}</div>
+            </div>'''
+
+    # ---- Security findings row helper ----
+    def sec_row(label, count, severity, max_val):
+        w   = round((count / max_val) * 100, 1) if max_val else 0
+        pct = round(count / total_objects * 100, 1)
+        hl  = " highlight" if count > 0 and severity in ("critical", "warning") else ""
+        return f'''
+            <div class="sec-row {severity}{hl}">
+                <div class="sec-sev"></div>
+                <span class="sec-label">{label}</span>
+                <span class="sec-count">{count}</span>
+                <div class="sec-track"><div class="sec-bar" style="width:{w}%"></div></div>
+                <span class="sec-pct">{pct}%</span>
+            </div>'''
+
+    # Attack surface
+    atk_max = max(u['noKerberosPreAuth'], l['spnUsers'], u['trustedForDelegation'],
+                  u['constrainedDelegation'], l['constrainedDelegationTarget'],
+                  l['resourceBasedConstrainedDelegation'], 1)
+    attack_rows = (
+        sec_row("No Kerberos PreAuth (ASREProastable)", u['noKerberosPreAuth'],                 "critical", atk_max) +
+        sec_row("Kerberoastable (Has SPN)",             l['spnUsers'],                           "critical", atk_max) +
+        sec_row("Unconstrained Delegation (KUD)",       u['trustedForDelegation'],               "critical", atk_max) +
+        sec_row("KCD w/ Protocol Transition",           u['constrainedDelegation'],              "warning",  atk_max) +
+        sec_row("KCD w/o Protocol Transition",          l['constrainedDelegationTarget'],        "warning",  atk_max) +
+        sec_row("RBCD Delegation",                      l['resourceBasedConstrainedDelegation'], "warning",  atk_max)
+    )
+
+    # Account status
+    acc_max = max(u['disabledAccounts'], u['accountLocked'], g['neverLoggedIn'],
+                  g['inactiveAccounts'], g['recentlyCreated'], l['adminCountUsers'], 1)
+    account_rows = (
+        sec_row("AdminCount = 1",             l['adminCountUsers'],  "warning", acc_max) +
+        sec_row("Account Disabled",           u['disabledAccounts'], "info",    acc_max) +
+        sec_row("Account Locked Out",         u['accountLocked'],    "info",    acc_max) +
+        sec_row("Never Logged In",            g['neverLoggedIn'],    "info",    acc_max) +
+        sec_row("Inactive (lastLogon > 90d)", g['inactiveAccounts'], "info",    acc_max) +
+        sec_row("Recently Created (30d)",     g['recentlyCreated'],  "info",    acc_max)
+    )
+
+    # Password policy
+    pwd_max = max(u['passwordNotRequired'], u['reversibleEncryption'], u['useDESKey'],
+                  u['passwordNeverExpires'], u['passwordCantChange'], u['passwordExpired'], 1)
+    password_rows = (
+        sec_row("Password Not Required",         u['passwordNotRequired'],  "critical", pwd_max) +
+        sec_row("Reversible Encryption Enabled", u['reversibleEncryption'], "critical", pwd_max) +
+        sec_row("Use DES Key Only",              u['useDESKey'],            "warning",  pwd_max) +
+        sec_row("Password Never Expires",        u['passwordNeverExpires'], "warning",  pwd_max) +
+        sec_row("User Cannot Change Password",   u['passwordCantChange'],   "warning",  pwd_max) +
+        sec_row("Password Expired",              u['passwordExpired'],      "info",     pwd_max)
+    )
+
+    # Other / info
+    other_max = max(l['hasDescription'], u['smartcardRequired'], u['notDelegated'],
+                    l['unsupportedOS'] if is_computers_file else 0, 1)
+    other_rows = sec_row("Has Description", l['hasDescription'], "info", other_max)
+    if is_computers_file:
+        other_rows += sec_row("Unsupported OS", l['unsupportedOS'], "critical", other_max)
+    other_rows += (
+        sec_row("Smartcard Required",  u['smartcardRequired'], "info", other_max) +
+        sec_row("Cannot Be Delegated", u['notDelegated'],      "info", other_max)
+    )
+
+    # Hero alerts — only show non-zero entries
+    hero_alerts = ""
+    hero_items = [
+        (u['noKerberosPreAuth'],    "ASREProastable",       "critical"),
+        (l['spnUsers'],             "Kerberoastable",       "critical"),
+        (u['trustedForDelegation'], "Unconstrained Deleg.", "critical"),
+        (u['passwordNotRequired'],  "No Pwd Required",      "critical"),
+        (u['reversibleEncryption'], "Reversible Enc.",      "critical"),
+        (l['adminCountUsers'],      "AdminCount=1",         "warning"),
+        (u['passwordNeverExpires'], "Pwd Never Expires",    "warning"),
+        (u['constrainedDelegation'],"KCD Proto. Trans.",    "warning"),
+    ]
+    if is_computers_file:
+        hero_items.insert(2, (l['unsupportedOS'], "Unsupported OS", "critical"))
+    for count, label, sev in hero_items:
+        if count > 0:
+            hero_alerts += f'<div class="hero-alert {sev}"><span class="ha-count">{count}</span><span class="ha-label">{label}</span></div>'
 
     html = f'''
         <div class="dashboard-container">
-            <div class="dashboard-header">
-                <h2>📈 LDAP Statistics Dashboard</h2>
-                <p class="dashboard-subtitle">Comprehensive analysis of LDAP directory objects</p>
-            </div>
-            
             <div class="stats-grid">
-                <!-- Global Statistics -->
-                <div class="stats-section">
-                    <h3>🌐 Global Statistics</h3>
-                    <div class="stats-cards">
-                        <div class="stat-card total">
-                            <div class="stat-value">{stats['global']['totalObjects']}</div>
-                            <div class="stat-label">Total Objects</div>
+
+                <!-- Hero -->
+                <div class="stats-hero full-width">
+                    <div class="hero-left">
+                        <div class="hero-total">
+                            <span class="hero-number">{total_objects}</span>
+                            <span class="hero-unit">objects</span>
                         </div>
-                        <div class="stat-card info">
-                            <div class="stat-value">{stats['global']['defaultObjects']}</div>
-                            <div class="stat-label">🏛️ Default Objects (RID ≤ 1000)</div>
-                        </div>
-                        <div class="stat-card info">
-                            <div class="stat-value">{stats['global']['nonDefaultObjects']}</div>
-                            <div class="stat-label">🛠️ Non-default Objects (RID > 1000)</div>
-                        </div>
-                        <div class="stat-card info">
-                            <div class="stat-value">{stats['global']['recentlyCreated']}</div>
-                            <div class="stat-label">🕒 Recently Created (30d)</div>
-                        </div>
-                        <div class="stat-card warning">
-                            <div class="stat-value">{stats['global']['inactiveAccounts']}</div>
-                            <div class="stat-label">💤 Inactive Accounts (lastLogon>90d)</div>
-                        </div>
-                        <div class="stat-card warning">
-                            <div class="stat-value">{stats['global']['neverLoggedIn']}</div>
-                            <div class="stat-label">❌ Never Logged In (logonCount=0)</div>
+                        <div class="hero-pills">
+                            <span class="hero-pill">🏛️ {g['defaultObjects']} default (RID ≤ 1000)</span>
+                            <span class="hero-pill">🛠️ {g['nonDefaultObjects']} non-default (RID > 1000)</span>
                         </div>
                     </div>
-                </div>
-                
-                <!-- UAC Statistics -->
-                <div class="stats-section uac-stats-section">
-                    <h3>🛡️ UAC Statistics</h3>
-                    
-                    <!-- Security Critical Section -->
-                    <div class="uac-subsection">
-                        <h4>🚨 Security Critical</h4>
-                        <div class="uac-compact-grid">
-                            <div class="uac-compact-item warning">
-                                <span class="uac-compact-value">{stats['uac']['disabledAccounts']}</span>
-                                <span class="uac-compact-label">🚫 Account Disabled</span>
-                            </div>
-                            <div class="uac-compact-item critical">
-                                <span class="uac-compact-value">{stats['uac']['noKerberosPreAuth']}</span>
-                                <span class="uac-compact-label">🔑 No Kerberos PreAuth</span>
-                            </div>
-                            <div class="uac-compact-item critical">
-                                <span class="uac-compact-value">{stats['uac']['trustedForDelegation']}</span>
-                                <span class="uac-compact-label">🎭🚀 Unconstrained Delegation (KUD)</span>
-                            </div>
-                            <div class="uac-compact-item warning">
-                                <span class="uac-compact-value">{stats['uac']['constrainedDelegation']}</span>
-                                <span class="uac-compact-label">🎭📌 Constrained Delegation (KCD w/ Protocol Transition)</span>
-                            </div>
-                            <div class="uac-compact-item warning">
-                                <span class="uac-compact-value">{stats['uac']['notDelegated']}</span>
-                                <span class="uac-compact-label">🛡️ Cannot Be Delegated</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Password Related Section -->
-                    <div class="uac-subsection">
-                        <h4>🔐 Password Related</h4>
-                        <div class="uac-compact-grid">
-                            <div class="uac-compact-item critical">
-                                <span class="uac-compact-value">{stats['uac']['passwordNotRequired']}</span>
-                                <span class="uac-compact-label">🔓 Password Not Required</span>
-                            </div>
-                            <div class="uac-compact-item warning">
-                                <span class="uac-compact-value">{stats['uac']['passwordNeverExpires']}</span>
-                                <span class="uac-compact-label">⏰ Password Never Expires</span>
-                            </div>
-                            <div class="uac-compact-item warning">
-                                <span class="uac-compact-value">{stats['uac']['passwordCantChange']}</span>
-                                <span class="uac-compact-label">🔒 User Cannot Change Password</span>
-                            </div>
-                            <div class="uac-compact-item info">
-                                <span class="uac-compact-value">{stats['uac']['passwordExpired']}</span>
-                                <span class="uac-compact-label">⚠️ Password Expired</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Authentication & Access Section -->
-                    <div class="uac-subsection">
-                        <h4>🔑 Authentication & Access</h4>
-                        <div class="uac-compact-grid">
-                            <div class="uac-compact-item info">
-                                <span class="uac-compact-value">{stats['uac']['smartcardRequired']}</span>
-                                <span class="uac-compact-label">💳 Smartcard Required</span>
-                            </div>
-                            <div class="uac-compact-item info">
-                                <span class="uac-compact-value">{stats['uac']['accountLocked']}</span>
-                                <span class="uac-compact-label">🔐 Account Locked Out</span>
-                            </div>
-                            <div class="uac-compact-item critical">
-                                <span class="uac-compact-value">{stats['uac']['reversibleEncryption']}</span>
-                                <span class="uac-compact-label">🔐 Reversible Encryption</span>
-                            </div>
-                            <div class="uac-compact-item warning">
-                                <span class="uac-compact-value">{stats['uac']['useDESKey']}</span>
-                                <span class="uac-compact-label">🔓 Use DES Key Only</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- LDAP Statistics -->
-                <div class="stats-section">
-                    <h3>🔍 LDAP Statistics</h3>
-                    
-                    <!-- Security Critical Attributes Section -->
-                    <h4>🚨 Security Critical Attributes</h4>
-                    <div class="stats-cards">
-                        <div class="stat-card critical">
-                            <div class="stat-value">{stats['ldap']['spnUsers']}</div>
-                            <div class="stat-label">🎯 Has SPN (Kerberoastable)</div>
-                        </div>
-                        <div class="stat-card warning">
-                            <div class="stat-value">{stats['ldap']['adminCountUsers']}</div>
-                            <div class="stat-label">👑 AdminCount = 1</div>
-                        </div>
-                        <div class="stat-card warning">
-                            <div class="stat-value">{stats['ldap']['constrainedDelegationTarget']}</div>
-                            <div class="stat-label">🎭📌 Constrained Delegation (KCD w/o Protocol Transition)</div>
-                        </div>
-                        <div class="stat-card warning">
-                            <div class="stat-value">{stats['ldap']['resourceBasedConstrainedDelegation']}</div>
-                            <div class="stat-label">🎭🧩 RBCD Delegation </div>
-                        </div>
-                        {'<div class="stat-card critical"><div class="stat-value">' + str(stats['ldap']['unsupportedOS']) + '</div><div class="stat-label">🖥️ Unsupported OS</div></div>' if is_computers_file else ''}
-                    </div>
-                    
-                    <!-- Information Disclosure Section -->
-                    <h4>📝 Information Disclosure</h4>
-                    <div class="stats-cards">
-                        <div class="stat-card info">
-                            <div class="stat-value">{stats['ldap']['hasDescription']}</div>
-                            <div class="stat-label">📄 Has Description</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Object Types Distribution -->
-                <div class="stats-section groups-section">
-                    <h3>🏗️ Object Types Distribution</h3>
-                    <div class="groups-list">
-                        {object_types_html}
-                    </div>
-                </div>
-                
-                <!-- Groups Statistics -->
-                <div class="stats-section groups-section">
-                    <h3>👥 Groups Distribution ({len(sorted_groups)})</h3>
-                    <div class="groups-list">
-                        {groups_html}
-                    </div>
-                </div>
-                
-                <!-- UAC Flags Distribution -->
-                <div class="stats-section uac-section">
-                    <h3>🛡️ UAC Flags Distribution ({len(sorted_uac_stats)})</h3>
-                    <div class="uac-stats-list">
-                        {uac_html}
+                    <div class="hero-alerts">
+                        {hero_alerts if hero_alerts else '<span class="hero-no-alerts">✅ No critical findings detected</span>'}
                     </div>
                 </div>
 
-                <!-- OS Distribution -->
-                {os_html}
-                
+                <!-- Security Findings — replaces old UAC + LDAP sections -->
+                <div class="stats-section full-width">
+                    <h3>🔍 Security Findings</h3>
+                    <div class="sec-categories">
+                        <div class="sec-category">
+                            <h5 class="sec-cat-title">⚔️ Attack Surface</h5>
+                            <div class="sec-rows">{attack_rows}</div>
+                        </div>
+                        <div class="sec-category">
+                            <h5 class="sec-cat-title">👤 Account Status</h5>
+                            <div class="sec-rows">{account_rows}</div>
+                        </div>
+                        <div class="sec-category">
+                            <h5 class="sec-cat-title">🔐 Password Policy</h5>
+                            <div class="sec-rows">{password_rows}</div>
+                        </div>
+                        <div class="sec-category">
+                            <h5 class="sec-cat-title">📋 Other</h5>
+                            <div class="sec-rows">{other_rows}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Groups Distribution -->
+                <div class="stats-section full-width">
+                    <h3>👥 Groups Distribution ({len(sorted_groups)})</h3>
+                    <div class="dist-list">{groups_html}</div>
+                </div>
+
+                <!-- UAC Flags | OS side-by-side -->
+                <div class="stats-section">
+                    <h3>🛡️ UAC Flags ({len(sorted_uac_stats)})</h3>
+                    <div class="dist-list">{uac_flags_html}</div>
+                </div>
+                {os_section_html}
+
             </div>
         </div>
     '''
-    
+
     return html
 
 # ============================================================================
@@ -898,59 +803,66 @@ def render_entry(entry: dict, index: int) -> str:
     return html
 
 def render_table(data: list, keys: list) -> str:
-    """
-    Renders all LDAP entries as an HTML table for the table view
-    
-    Args:
-        data (list): List of LDAP entry dictionaries
-        keys (list): List of all attribute names to include as columns
-        
-    Returns:
-        str: HTML string representing a complete table with headers and data
-    """
-    # Define minimal columns (same as ldapdomaindump)
-    minimal_columns = {
-        'cn', 'sAMAccountName', 'whenCreated', 'whenChanged', 'lastLogon', 
-        'userAccountControl', 'pwdLastSet', 'objectSid', 'memberOf','description', 'servicePrincipalName',
+    # Ordered minimal columns — only these are shown in the table view
+    minimal_columns_ordered = [
+        'sAMAccountName', 'cn', 'description', 'memberOf', 'userAccountControl',
+        'pwdLastSet', 'lastLogon', 'whenCreated', 'whenChanged',
+        'objectSid',
+        'servicePrincipalName',
         'dNSHostName', 'operatingSystem', 'operatingSystemVersion', 'operatingSystemServicePack',
-        'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType'
-    }
+        'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType',
+    ]
 
-    # Build table header with DN column first, then all attribute columns
-    html = "<table>\n<thead><tr><th>DN</th>"
-    for k in keys:
-        # Add data attribute to identify minimal columns
-        col_class = 'minimal-column' if k in minimal_columns else 'extended-column'
-        html += f"<th class='{col_class}'>{k}</th>"
+    # Keep only columns that actually exist in the data
+    present_keys = set(keys)
+    table_keys = [k for k in minimal_columns_ordered if k in present_keys]
+
+    html = "<table>\n<thead><tr><th>Name</th>"
+    for k in table_keys:
+        label = "RID" if k == "objectSid" else k
+        html += f"<th>{label}</th>"
     html += "</tr></thead>\n<tbody>\n"
 
-    # Process each LDAP entry as a table row
-    for entry in data:
+    for idx, entry in enumerate(data):
         attributes = entry.get("attributes", {})
         dn = entry.get("dn", "")
         display_name = extract_display_name(attributes, dn)
-        
-        html += f"<tr><td>{display_name}</td>"
 
-        # Add cell for each attribute column
-        for k in keys:
-            # Add data attribute to identify minimal columns
-            col_class = 'minimal-column' if k in minimal_columns else 'extended-column'
-            
+        html += f'<tr data-attr-id="attr{idx}"><td>{display_name}</td>'
+
+        for k in table_keys:
             values = attributes.get(k, [])
-            val = ', '.join(map(str, values))
 
-            # Special handling for userAccountControl
             if k == "userAccountControl" and values:
                 try:
                     uac_value = int(values[0])
                     uac_flags = decode_uac_flags(uac_value)
                     val = format_uac_display_html(uac_value, uac_flags)
                 except (ValueError, TypeError):
-                    pass
+                    val = str(values[0]) if values else ""
 
-            html += f"<td class='{col_class}'>{val}</td>"
+            elif k == "memberOf":
+                # Extract CN name from each DN, stripping the "CN=" prefix
+                group_names = []
+                for dn_val in values:
+                    if isinstance(dn_val, str):
+                        first = dn_val.split(',')[0].strip()
+                        if first.upper().startswith('CN='):
+                            group_names.append(first[3:])
+                        else:
+                            group_names.append(first)
+                val = ', '.join(group_names)
+
+            elif k == "objectSid" and values:
+                rid = getRIDFromObjectSID(str(values[0]))
+                val = str(rid) if rid is not None else str(values[0])
+
+            else:
+                val = ', '.join(map(str, values))
+
+            html += f"<td>{val}</td>"
         html += "</tr>\n"
+
     html += "</tbody>\n</table>\n"
     return html
 
@@ -1610,7 +1522,7 @@ logo_ascii = r"""
 
 if __name__ == "__main__":
     print(logo_ascii)
-    print("LDAPViewer v3.1 - by NathanielSlw\n")
+    print("LDAPViewer v4.0 - by NathanielSlw\n")
     
     parser = argparse.ArgumentParser(
         description='Generates an interactive HTML interface to explore ldapdomaindump JSON files.',
