@@ -183,6 +183,21 @@
                                     <button class="filter-chip" data-attribute="msDS-AllowedToActOnBehalfOfOtherIdentity" onclick="toggleFilterChip(this, 'ldap')">
                                         🎭🧩 RBCD Delegation
                                     </button>
+                                    <button class="filter-chip" data-attribute="objectClass" data-contains="msDS-GroupManagedServiceAccount" onclick="toggleFilterChip(this, 'ldap')">
+                                        🔑 gMSA Account
+                                    </button>
+                                    <button class="filter-chip" data-attribute="objectClass" data-contains="msDS-DelegatedManagedServiceAccount" onclick="toggleFilterChip(this, 'ldap')">
+                                        🧬 dMSA Account
+                                    </button>
+                                    <button class="filter-chip" data-attribute="netbootServer" onclick="toggleFilterChip(this, 'ldap')">
+                                        🖧 PXE Boot Server (netbootServer)
+                                    </button>
+                                    <button class="filter-chip" data-attribute="msSMSSiteCode" onclick="toggleFilterChip(this, 'ldap')">
+                                        📦 SCCM Client (msSMSSiteCode)
+                                    </button>
+                                    <button class="filter-chip" data-attribute="objectClass" data-contains="mSSMSManagementPoint" onclick="toggleFilterChip(this, 'ldap')">
+                                        🗄️ SCCM Management Point
+                                    </button>
                                     <button class="filter-chip" id="unsupportedOSChip" onclick="toggleUnsupportedOSFilter(this)">
                                         🖥️ Unsupported OS
                                     </button>

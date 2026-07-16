@@ -237,26 +237,31 @@ function hasUACFlags(userAccountControl, flags) {
     });
 }
 
-function hasLDAPAttribute(entry, attributeName, expectedValue = null) {
+function hasLDAPAttribute(entry, attributeName, expectedValue = null, containsValue = null) {
     // Special case for Kerberoastable (Has SPN)
-    if (attributeName === 'servicePrincipalName' && expectedValue === null) {
+    if (attributeName === 'servicePrincipalName' && expectedValue === null && !containsValue) {
         return isKerberoastable(entry);
     }
 
     const attributeCell = Array.from(entry.getElementsByClassName('key'))
         .find(cell => cell.textContent === attributeName);
-    
+
     if (!attributeCell) return false;
-    
+
     const valueCell = attributeCell.nextElementSibling;
     if (!valueCell) return false;
-    
+
     const attributeValue = valueCell.textContent.trim();
-    
+
+    // Multi-valued attributes (e.g. objectClass) need a substring match rather than exact equality
+    if (containsValue) {
+        return attributeValue.includes(containsValue);
+    }
+
     if (expectedValue === null) {
         return attributeValue !== '';
     }
-    
+
     return attributeValue === expectedValue;
 }
 
@@ -474,12 +479,11 @@ function applyFiltersToDetailView() {
                 if (filterStates.ldapAttributes.enabled && shouldShow) {
                     shouldShow = filterStates.ldapAttributes.attributes.every(attrFilter => {
                         if (attrFilter.unsupportedOS) {
-                            // Cherche la valeur de operatingSystem
                             const osCell = Array.from(entry.getElementsByClassName('key')).find(cell => cell.textContent === 'operatingSystem');
                             const osValue = osCell ? osCell.nextElementSibling.textContent.trim() : "";
                             return hasUnsupportedOS(osValue);
                         } else {
-                            return hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value);
+                            return hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value, attrFilter.contains);
                         }
                     });
                 }
@@ -540,11 +544,11 @@ function applyFiltersToDetailView() {
                         const osValue = osCell ? osCell.nextElementSibling.textContent.trim() : "";
                         return hasUnsupportedOS(osValue);
                     } else {
-                        return hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value);
+                        return hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value, attrFilter.contains);
                     }
                 });
             }
-            
+
             entry.style.display = shouldShow ? "" : "none";
         }
     }
@@ -678,7 +682,7 @@ function applyFiltersToTableView() {
                         return hasUnsupportedOS(osValue);
                     }
                     return false;
-                } else if (attrFilter.attribute === 'servicePrincipalName' && attrFilter.value === null) {
+                } else if (attrFilter.attribute === 'servicePrincipalName' && attrFilter.value === null && !attrFilter.contains) {
                     // Kerberoastable logic for table view
                     const spnIndex = Array.from(ths).findIndex(th => th.textContent === 'servicePrincipalName');
                     const uacIndex = Array.from(ths).findIndex(th => th.textContent === 'userAccountControl');
@@ -701,6 +705,9 @@ function applyFiltersToTableView() {
                     if (attrIndex !== -1) {
                         const cell = row.cells[attrIndex];
                         const cellValue = cell ? cell.textContent.trim() : "";
+                        if (attrFilter.contains) {
+                            return cellValue.includes(attrFilter.contains);
+                        }
                         if (attrFilter.value === null) {
                             return cellValue !== '';
                         } else {
@@ -874,14 +881,21 @@ function applyUACFilter() {
 
 function applyLDAPAttributeFilter() {
     const activeChips = document.querySelectorAll('#ldapTab .filter-chip.active');
-    const selectedAttributes = Array.from(activeChips).map(chip => ({
-        attribute: chip.dataset.attribute,
-        value: chip.dataset.value || null
-    }));
-    
-    filterStates.ldapAttributes.enabled = selectedAttributes.length > 0;
-    filterStates.ldapAttributes.attributes = selectedAttributes;
-    
+    const selectedAttributes = Array.from(activeChips)
+        .filter(chip => chip.dataset.attribute)
+        .map(chip => ({
+            attribute: chip.dataset.attribute,
+            value: chip.dataset.value || null,
+            contains: chip.dataset.contains || null
+        }));
+
+    // Preserve special filters managed by their own toggle functions
+    const specialFilters = filterStates.ldapAttributes.attributes.filter(a => a.unsupportedOS);
+    const merged = [...selectedAttributes, ...specialFilters];
+
+    filterStates.ldapAttributes.enabled = merged.length > 0;
+    filterStates.ldapAttributes.attributes = merged;
+
     applyAllFilters();
 }
 
@@ -1544,18 +1558,19 @@ function createGroupSection(groupName, users) {
     const section = document.createElement('div');
     section.className = 'group-section';
     
-    // Group header
+    // Group header (collapsed by default)
     const header = document.createElement('div');
-    header.className = 'group-header';
+    header.className = 'group-header collapsed';
     header.innerHTML = `
         <h3 class="group-title">${groupName}</h3>
         <span class="group-count">${users.length} user${users.length !== 1 ? 's' : ''}</span>
     `;
     section.appendChild(header);
-    
-    // Group container for entries
+
+    // Group container for entries (collapsed by default)
     const container = document.createElement('div');
     container.className = 'group-entries';
+    container.style.display = 'none';
     
     users.forEach((userData, index) => {
         const entryClone = userData.element.cloneNode(true);

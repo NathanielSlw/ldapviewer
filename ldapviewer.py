@@ -5,6 +5,7 @@ import sys
 import os
 import argparse
 import base64
+import struct
 from datetime import datetime
 
 # ============================================================================
@@ -111,7 +112,11 @@ def format_uac_display_html(uac_value, flags):
         name = flag["name"]
         severity = flag["severity"]
         description = flag["description"]
-        flags_html += f'<span class="uac-flag {severity}" data-flag="{name}" data-description="{description}">{name}</span>'
+        # Per-flag color (see "INDIVIDUAL UAC FLAG COLORS" in style.css) overrides
+        # the coarse severity color, so each of the 23 UAC flags is uniquely
+        # identifiable while flags from the same category share a color family
+        flag_slug = name.lower().replace('_', '-')
+        flags_html += f'<span class="uac-flag {severity} flag-{flag_slug}" data-flag="{name}" data-description="{description}">{name}</span>'
     
     return f'''
     <div class="uac-container">
@@ -270,13 +275,319 @@ def is_kerberoastable(attributes):
             pass
     return True
 
+def is_gmsa(attributes):
+    """
+    Returns True if the entry is a gMSA (group Managed Service Account).
+
+    A gMSA's objectClass contains "msDS-GroupManagedServiceAccount"
+    """
+    object_class = attributes.get("objectClass", [])
+    return "msDS-GroupManagedServiceAccount" in object_class
+
+def is_dmsa(attributes):
+    """
+    Returns True if the entry is a dMSA (Delegated Managed Service Account).
+
+    A dMSA's objectClass contains "msDS-DelegatedManagedServiceAccount"
+    """
+    object_class = attributes.get("objectClass", [])
+    return "msDS-DelegatedManagedServiceAccount" in object_class
+
+# msDS-DelegatedMSAState values (dMSA migration state machine)
+DMSA_STATE_FLAGS = {
+    0: {"name": "NOT_SET", "severity": "info",
+        "description": "No migration state set (standalone dMSA, not linked to any migration)"},
+    1: {"name": "MIGRATION_IN_PROGRESS", "severity": "warning",
+        "description": "dMSA migration in progress: linked to a superseded account via msDS-ManagedAccountPrecededByLink"},
+    2: {"name": "MIGRATION_COMPLETED", "severity": "critical",
+        "description": "Migration marked as completed: the KDC includes the superseded account's SID in this dMSA's PAC without verifying a real migration took place. This is the state abused by the BadSuccessor attack - verify legitimacy and check who could write these attributes / CreateChild rights on the parent OU."},
+    3: {"name": "STANDALONE", "severity": "info",
+        "description": "Standalone dMSA (not created from a migration)"},
+}
+
+def decode_delegated_msa_state(state_value):
+    """
+    Decode msDS-DelegatedMSAState into a flag list compatible with
+    format_uac_display_html(), so the same styling/tooltip UI is reused.
+    """
+    flag = DMSA_STATE_FLAGS.get(state_value)
+    if not flag:
+        return []
+    return [flag]
+
+def is_dmsa_migration_completed(attributes):
+    """
+    Returns True for a dMSA whose migration is marked "completed"
+    (msDS-DelegatedMSAState == 2) with msDS-ManagedAccountPrecededByLink set.
+
+    This is NOT a confirmed BadSuccessor vulnerability - a legitimate migration
+    ends up in the exact same state. Confirming actual exploitability requires
+    checking who has CreateChild / write rights on the dMSA or its parent OU,
+    which isn't part of an ldapdomaindump JSON export (use bloodyAD/netexec's
+    badsuccessor module for that). This only flags dMSA worth a manual review.
+    """
+    if not is_dmsa(attributes):
+        return False
+    preceded_by = attributes.get("msDS-ManagedAccountPrecededByLink", [])
+    if not preceded_by:
+        return False
+    state_values = attributes.get("msDS-DelegatedMSAState", [])
+    if not state_values:
+        return False
+    try:
+        return int(state_values[0]) == 2
+    except (ValueError, TypeError):
+        return False
+
+
+# ============================================================================
+# gMSA MEMBERSHIP DECODING (msDS-GroupMSAMembership)
+# ============================================================================
+# msDS-GroupMSAMembership is a self-relative NT security descriptor (MS-DTYP 2.4.6)
+# whose DACL lists which principals are allowed to retrieve the gMSA's password.
+
+WELL_KNOWN_SIDS = {
+    "S-1-1-0": "Everyone",
+    "S-1-5-18": "NT AUTHORITY\\SYSTEM",
+    "S-1-5-19": "NT AUTHORITY\\LOCAL SERVICE",
+    "S-1-5-20": "NT AUTHORITY\\NETWORK SERVICE",
+    "S-1-5-32-544": "BUILTIN\\Administrators",
+    "S-1-5-32-545": "BUILTIN\\Users",
+    "S-1-5-32-546": "BUILTIN\\Guests",
+    "S-1-5-32-548": "BUILTIN\\Account Operators",
+    "S-1-5-32-549": "BUILTIN\\Server Operators",
+    "S-1-5-32-550": "BUILTIN\\Print Operators",
+    "S-1-5-32-551": "BUILTIN\\Backup Operators",
+    "S-1-5-32-554": "BUILTIN\\Pre-Windows 2000 Compatible Access",
+}
+
+def _parse_sid(data, offset):
+    """
+    Parse a binary NT SID (MS-DTYP 2.4.2) starting at `offset`.
+
+    Returns:
+        tuple: (sid_string or None, bytes_consumed)
+    """
+    try:
+        revision = data[offset]
+        sub_count = data[offset + 1]
+        authority = int.from_bytes(data[offset + 2:offset + 8], 'big')
+        pos = offset + 8
+        sub_auths = []
+        for _ in range(sub_count):
+            sub_auths.append(int.from_bytes(data[pos:pos + 4], 'little'))
+            pos += 4
+        parts = "-".join(map(str, sub_auths))
+        sid_str = f"S-{revision}-{authority}-{parts}" if parts else f"S-{revision}-{authority}"
+        return sid_str, pos - offset
+    except (IndexError, struct.error):
+        return None, 0
+
+def decode_group_msa_membership(values):
+    """
+    Decode msDS-GroupMSAMembership into the list of principals allowed to
+    read the gMSA's password (the ACCESS_ALLOWED entries of its DACL).
+
+    Args:
+        values (list): Raw attribute values as found in the LDAP JSON dump
+
+    Returns:
+        str or None: HTML string, or None if the value couldn't be parsed
+    """
+    if not values:
+        return None
+
+    raw = values[0]
+    if not (isinstance(raw, dict) and raw.get('encoding') == 'base64'):
+        return None
+
+    try:
+        data = base64.b64decode(raw.get('encoded', ''))
+    except Exception:
+        return None
+
+    # Self-relative security descriptor header (MS-DTYP 2.4.6): revision, sbz1,
+    # control flags, then 4 offsets (owner, group, sacl, dacl)
+    if len(data) < 20:
+        return None
+    try:
+        control, = struct.unpack_from("<H", data, 2)
+        off_dacl, = struct.unpack_from("<L", data, 16)
+    except struct.error:
+        return None
+
+    # SE_DACL_PRESENT (0x0004): no DACL means nobody is explicitly granted read access
+    if not (control & 0x0004) or off_dacl == 0 or off_dacl + 8 > len(data):
+        return None
+
+    try:
+        ace_count, = struct.unpack_from("<H", data, off_dacl + 4)
+    except struct.error:
+        return None
+
+    principals = []
+    pos = off_dacl + 8
+    for _ in range(ace_count):
+        if pos + 8 > len(data):
+            break
+        ace_type = data[pos]
+        ace_size, = struct.unpack_from("<H", data, pos + 2)
+        if ace_size <= 0 or pos + ace_size > len(data):
+            break
+
+        if ace_type == 0:  # ACCESS_ALLOWED_ACE_TYPE
+            sid_str, _ = _parse_sid(data, pos + 8)
+            if sid_str:
+                principals.append(sid_str)
+
+        pos += ace_size
+
+    if not principals:
+        return '<span class="gmsa-no-readers">⚠️ No principal can read this password</span>'
+
+    html = '<div class="gmsa-readers">'
+    for sid_str in principals:
+        label = WELL_KNOWN_SIDS.get(sid_str, sid_str)
+        html += f'<span class="gmsa-reader-chip" title="{sid_str}">{label}</span>'
+    html += '</div>'
+    return html
+
+
+# ============================================================================
+# ADWSDOMAINDUMP FORMAT SUPPORT
+# ============================================================================
+# adwsdomaindump (ADWS-based dumping) produces a JSON
+# structure that differs from ldapdomaindump's {"dn", "attributes": {...}}:
+# entries are flat dicts (no "attributes"/"dn" wrapper), every value is a
+# single scalar instead of a list, and several attributes use raw encodings
+# (FILETIME integers, AD generalized time, binary SID/GUID) instead of the
+# human-readable strings ldapdomaindump already resolves. These helpers
+# detect that format and normalize it into ldapdomaindump's structure so the
+# rest of the script can treat both formats identically.
+
+from datetime import datetime, timedelta
+
+# Attributes holding a Windows FILETIME (100ns intervals since 1601-01-01) as a decimal string
+ADWS_FILETIME_ATTRIBUTES = {
+    'lastLogon', 'lastLogonTimestamp', 'pwdLastSet', 'badPasswordTime',
+    'accountExpires', 'lastLogoff', 'lockoutTime'
+}
+# Attributes holding AD generalized time (e.g. "20250215072421.0Z")
+ADWS_GENERALIZED_TIME_ATTRIBUTES = {'whenCreated', 'whenChanged', 'dSCorePropagationData'}
+# Attributes holding a raw base64-encoded binary blob (ldapdomaindump wraps these
+# in {"encoding": "base64", "encoded": ...} dicts; adwsdomaindump doesn't)
+ADWS_BASE64_BLOB_ATTRIBUTES = {
+    'nTSecurityDescriptor', 'msDS-GroupMSAMembership', 'msDS-AllowedToActOnBehalfOfOtherIdentity'
+}
+
+def filetime_to_ad_string(value):
+    """
+    Convert a Windows FILETIME (100ns intervals since 1601-01-01) to the
+    same date string format ldapdomaindump uses, including its sentinel
+    values for "never" (0) and "no expiration" (0x7FFFFFFFFFFFFFFF).
+    """
+    try:
+        filetime = int(value)
+    except (ValueError, TypeError):
+        return value
+    if filetime <= 0:
+        return "1601-01-01 00:00:00+00:00"
+    if filetime >= 0x7FFFFFFFFFFFFFFF:
+        return "9999-12-31 23:59:59.999999+00:00"
+    try:
+        dt = datetime(1601, 1, 1) + timedelta(microseconds=filetime / 10)
+        return dt.strftime("%Y-%m-%d %H:%M:%S.%f") + "+00:00"
+    except (OverflowError, OSError, ValueError):
+        return "9999-12-31 23:59:59.999999+00:00"
+
+def generalized_time_to_ad_string(value):
+    """
+    Convert AD generalized time (e.g. "20250215072421.0Z") to ldapdomaindump's
+    date string format.
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        base = value.strip().split('.')[0]
+        dt = datetime.strptime(base, "%Y%m%d%H%M%S")
+        return dt.strftime("%Y-%m-%d %H:%M:%S") + "+00:00"
+    except ValueError:
+        return value
+
+def decode_raw_sid_base64(value):
+    """
+    Decode a base64-encoded raw binary SID (as produced by adwsdomaindump)
+    into the "S-1-5-..." string format ldapdomaindump already uses.
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        raw = base64.b64decode(value)
+        sid_str, _ = _parse_sid(raw, 0)
+        return sid_str if sid_str else value
+    except Exception:
+        return value
+
+def format_adws_object_guid(value):
+    """
+    Normalize adwsdomaindump's plain GUID string ("6827C777-...") to
+    ldapdomaindump's braced/lowercase format ("{6827c777-...}").
+    """
+    if isinstance(value, str) and not value.startswith('{'):
+        return '{' + value.lower() + '}'
+    return value
+
+def convert_adws_entry(entry: dict) -> dict:
+    """
+    Convert a single flat adwsdomaindump entry into the ldapdomaindump-style
+    {"dn": ..., "attributes": {key: [values]}} structure the rest of this
+    script expects.
+    """
+    dn = entry.get("distinguishedName", "")
+    attributes = {}
+    for key, value in entry.items():
+        if key == "distinguishedName":
+            continue
+        values = value if isinstance(value, list) else [value]
+        if key == "objectSid":
+            values = [decode_raw_sid_base64(v) for v in values]
+        elif key == "objectGUID":
+            values = [format_adws_object_guid(v) for v in values]
+        elif key in ADWS_FILETIME_ATTRIBUTES:
+            values = [filetime_to_ad_string(v) for v in values]
+        elif key in ADWS_GENERALIZED_TIME_ATTRIBUTES:
+            values = [generalized_time_to_ad_string(v) for v in values]
+        elif key in ADWS_BASE64_BLOB_ATTRIBUTES:
+            values = [{"encoding": "base64", "encoded": v} if isinstance(v, str) else v for v in values]
+        attributes[key] = values
+    return {"dn": dn, "attributes": attributes}
+
+def is_adws_dump_format(data: list) -> bool:
+    """
+    Detect adwsdomaindump JSON exports: flat dicts carrying
+    "distinguishedName" directly, instead of ldapdomaindump's
+    {"dn", "attributes"} wrapper.
+    """
+    if not data or not isinstance(data, list) or not isinstance(data[0], dict):
+        return False
+    first = data[0]
+    return "attributes" not in first and "distinguishedName" in first
+
+def normalize_ldap_data(data: list) -> list:
+    """
+    Normalize input data to ldapdomaindump's {"dn", "attributes"} structure,
+    converting adwsdomaindump exports on the fly. ldapdomaindump exports are
+    returned unchanged.
+    """
+    if is_adws_dump_format(data):
+        return [convert_adws_entry(entry) for entry in data]
+    return data
+
 
 # ============================================================================
 # STATISTICS CALCULATION FUNCTIONS
 # ============================================================================
 # Functions to calculate statistics from LDAP data
-
-from datetime import datetime, timedelta
 
 def parse_ad_date(date_str):
     """
@@ -334,9 +645,14 @@ def calculate_ldap_statistics(data):
             'adminCountUsers': 0,
             'constrainedDelegationTarget': 0,
             'resourceBasedConstrainedDelegation': 0,
+            'gmsaAccounts': 0,
+            'dmsaAccounts': 0,
             # Information Disclosure
             'hasDescription': 0,
             'unsupportedOS': 0,
+            'pxeBootServers': 0,
+            'sccmClients': 0,
+            'sccmManagementPoints': 0,
         },
         'groups': {},
         'uacStats': {},
@@ -490,6 +806,29 @@ def calculate_ldap_statistics(data):
             if any(x in os_key.lower() for x in ["2000", "2003", "2008", "xp", "vista", "7", "me"]):
                 stats['ldap']['unsupportedOS'] += 1
 
+        # gMSA (group Managed Service Account) check
+        if is_gmsa(attributes):
+            stats['ldap']['gmsaAccounts'] += 1
+
+        # dMSA (Delegated Managed Service Account) check
+        if is_dmsa(attributes):
+            stats['ldap']['dmsaAccounts'] += 1
+
+        # PXE Boot Server check
+        netboot_server = attributes.get("netbootServer", [])
+        if netboot_server and any(v.strip() for v in netboot_server):
+            stats['ldap']['pxeBootServers'] += 1
+
+        # SCCM Client check (msSMSSiteCode present = enrolled SCCM client)
+        sccm_site_code = attributes.get("msSMSSiteCode", [])
+        if sccm_site_code and any(v.strip() for v in sccm_site_code):
+            stats['ldap']['sccmClients'] += 1
+
+        # SCCM Management Point check (objectClass contains mSSMSManagementPoint)
+        object_class = attributes.get("objectClass", [])
+        if "mSSMSManagementPoint" in object_class:
+            stats['ldap']['sccmManagementPoints'] += 1
+
         # Has Description check
         description = attributes.get("description", [])
         if description and any(desc.strip() for desc in description):
@@ -602,11 +941,20 @@ def render_statistics_html(stats, is_computers_file=False):
     )
 
     # Other / info
-    other_max = max(l['hasDescription'], u['smartcardRequired'], u['notDelegated'],
-                    l['unsupportedOS'] if is_computers_file else 0, 1)
+    other_max = max(l['hasDescription'], u['smartcardRequired'], u['notDelegated'], l['gmsaAccounts'],
+                    l['dmsaAccounts'] if is_computers_file else 0,
+                    l['unsupportedOS'] if is_computers_file else 0,
+                    l['pxeBootServers'] if is_computers_file else 0,
+                    l['sccmClients'] if is_computers_file else 0,
+                    l['sccmManagementPoints'] if is_computers_file else 0, 1)
     other_rows = sec_row("Has Description", l['hasDescription'], "info", other_max)
     if is_computers_file:
-        other_rows += sec_row("Unsupported OS", l['unsupportedOS'], "critical", other_max)
+        other_rows += sec_row("Unsupported OS",                      l['unsupportedOS'],          "critical", other_max)
+        other_rows += sec_row("gMSA (Group Managed Service Account)", l['gmsaAccounts'],           "warning",  other_max)
+        other_rows += sec_row("DMSA Accounts (check for BadSuccessor)", l['dmsaAccounts'],         "warning",  other_max)
+        other_rows += sec_row("PXE Boot Server (netbootServer)",     l['pxeBootServers'],         "warning",  other_max)
+        other_rows += sec_row("SCCM Clients (msSMSSiteCode)",        l['sccmClients'],            "warning",  other_max)
+        other_rows += sec_row("SCCM Management Points",              l['sccmManagementPoints'],   "warning",  other_max)
     other_rows += (
         sec_row("Smartcard Required",  u['smartcardRequired'], "info", other_max) +
         sec_row("Cannot Be Delegated", u['notDelegated'],      "info", other_max)
@@ -625,7 +973,14 @@ def render_statistics_html(stats, is_computers_file=False):
         (u['constrainedDelegation'],"KCD Proto. Trans.",    "warning"),
     ]
     if is_computers_file:
-        hero_items.insert(2, (l['unsupportedOS'], "Unsupported OS", "critical"))
+        hero_items.append((l['unsupportedOS'], "Unsupported OS", "critical"))
+        hero_items.append((l['gmsaAccounts'], "gMSA Accounts", "warning"))
+        hero_items.append((l['dmsaAccounts'], "DMSA Accounts (check for BadSuccessor)", "warning"))
+
+    # Sort by severity (critical first, then warning) while keeping relative order within each group
+    severity_rank = {"critical": 0, "warning": 1}
+    hero_items.sort(key=lambda item: severity_rank.get(item[2], 2))
+
     for count, label, sev in hero_items:
         if count > 0:
             hero_alerts += f'<div class="hero-alert {sev}"><span class="ha-count">{count}</span><span class="ha-label">{label}</span></div>'
@@ -739,11 +1094,11 @@ def format_groups_chips_html(group_names):
 def render_entry(entry: dict, index: int) -> str:
     """
     Renders a single LDAP entry as HTML for the detail view
-    
+
     Args:
         entry (dict): LDAP entry containing 'dn' and 'attributes' keys
         index (int): Unique index for generating HTML element IDs
-        
+
     Returns:
         str: HTML string representing the entry with collapsible attributes
     """
@@ -760,6 +1115,27 @@ def render_entry(entry: dict, index: int) -> str:
     if kerberoastable:
         spn_chip_html = '<span class="spn-chip" title="Kerberoastable: Has SPN">🎯</span>'
 
+    # gMSA icon HTML (can be styled via CSS)
+    gmsa_chip_html = ''
+    if is_gmsa(attributes):
+        gmsa_chip_html = '<span class="gmsa-chip" title="gMSA: Group Managed Service Account">🔑</span>'
+
+    # dMSA icon HTML + BadSuccessor risk icon (can be styled via CSS)
+    dmsa_chip_html = ''
+    dmsa_review_chip_html = ''
+    dmsa_migration_completed = is_dmsa_migration_completed(attributes)
+    if is_dmsa(attributes):
+        dmsa_chip_html = '<span class="dmsa-chip" title="dMSA: Delegated Managed Service Account">🧬</span>'
+        if dmsa_migration_completed:
+            dmsa_review_chip_html = (
+                '<span class="dmsa-review-chip" '
+                'title="BadSuccessor risk: msDS-DelegatedMSAState=2 (migration completed) with '
+                'msDS-ManagedAccountPrecededByLink set. The KDC embeds the linked account SID in this '
+                'dMSA PAC without verifying a real migration happened. Confirm legitimacy and check who '
+                'can write these attributes / has CreateChild on the parent OU (e.g. nxc ldap -M badsuccessor).">'
+                '💀</span>'
+            )
+
     # Extract and format groups
     memberof_values = attributes.get("memberOf", [])
     group_names = extract_group_names(memberof_values, attributes)
@@ -768,17 +1144,18 @@ def render_entry(entry: dict, index: int) -> str:
     # Create collapsible entry header with toggle functionality
     html = f'''<div class="entry">
 <div class="entry-header" onclick="toggle('attr{index}')">
-    <h2>{display_name} {spn_chip_html}</h2>
+    <h2>{display_name} {spn_chip_html}{gmsa_chip_html}{dmsa_chip_html}{dmsa_review_chip_html}</h2>
     {groups_chips_html}
 </div>
 <div class="attributes" id="attr{index}">'''
 
     # Define minimal columns (same as ldapdomaindump)
     minimal_columns = {
-        'cn', 'sAMAccountName', 'whenCreated', 'whenChanged', 'lastLogon', 
+        'cn', 'sAMAccountName', 'whenCreated', 'whenChanged', 'lastLogon',
         'userAccountControl', 'pwdLastSet', 'objectSid', 'memberOf','description', 'servicePrincipalName',
         'dNSHostName', 'operatingSystem', 'operatingSystemVersion', 'operatingSystemServicePack',
-        'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType'
+        'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType',
+        'msDS-DelegatedMSAState', 'msDS-ManagedAccountPrecededByLink'
     }
 
     # Build attributes table
@@ -798,6 +1175,25 @@ def render_entry(entry: dict, index: int) -> str:
             except (ValueError, TypeError):
                 pass
 
+        # Special handling for msDS-GroupMSAMembership (gMSA password readers)
+        if key == "msDS-GroupMSAMembership" and values:
+            decoded = decode_group_msa_membership(values)
+            if decoded:
+                val = decoded
+
+        # Special handling for msDS-DelegatedMSAState (dMSA migration state)
+        if key == "msDS-DelegatedMSAState" and values:
+            try:
+                state_value = int(values[0])
+                state_flags = decode_delegated_msa_state(state_value)
+                val = format_uac_display_html(state_value, state_flags)
+            except (ValueError, TypeError):
+                pass
+
+        # Highlight msDS-ManagedAccountPrecededByLink when the migration is marked completed (review for BadSuccessor)
+        if key == "msDS-ManagedAccountPrecededByLink" and values and dmsa_migration_completed:
+            val = f'<span class="dmsa-flagged-value" title="This dMSA is marked as migrated (state=2): the KDC will trust this link and embed the target account SID in the dMSA PAC.">⚠️ {val}</span>'
+
         html += f'<tr class="{row_class}"><td class="key">{key}</td><td class="value">{val}</td></tr>\n'
     html += "</table>\n</div>\n</div>\n"
     return html
@@ -811,6 +1207,7 @@ def render_table(data: list, keys: list) -> str:
         'servicePrincipalName',
         'dNSHostName', 'operatingSystem', 'operatingSystemVersion', 'operatingSystemServicePack',
         'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType',
+        'msDS-DelegatedMSAState', 'msDS-ManagedAccountPrecededByLink',
     ]
 
     # Keep only columns that actually exist in the data
@@ -840,6 +1237,17 @@ def render_table(data: list, keys: list) -> str:
                     val = format_uac_display_html(uac_value, uac_flags)
                 except (ValueError, TypeError):
                     val = str(values[0]) if values else ""
+
+            elif k == "msDS-DelegatedMSAState" and values:
+                try:
+                    state_value = int(values[0])
+                    state_flags = decode_delegated_msa_state(state_value)
+                    val = format_uac_display_html(state_value, state_flags)
+                except (ValueError, TypeError):
+                    val = str(values[0]) if values else ""
+
+            elif k == "msDS-ManagedAccountPrecededByLink" and values and is_dmsa_migration_completed(attributes):
+                val = f'<span class="dmsa-flagged-value">⚠️ {", ".join(map(str, values))}</span>'
 
             elif k == "memberOf":
                 # Extract CN name from each DN, stripping the "CN=" prefix
@@ -1441,8 +1849,14 @@ def main(input_file):
         print(f"[!] Error reading file '{input_file}': {e}")
         return
 
+    # Normalize adwsdomaindump's flat, single-valued export into ldapdomaindump's
+    # {"dn", "attributes"} structure so the rest of the pipeline is format-agnostic
+    if is_adws_dump_format(data):
+        print(f"[+] Detected adwsdomaindump format, converting to ldapdomaindump structure")
+        data = normalize_ldap_data(data)
+
     print(f"Processing {len(data)} entries from '{input_file}'")
-    
+
     # Check if this is a policy file
     if is_policy_file(input_file):
         render_policy_report(data, input_file)
