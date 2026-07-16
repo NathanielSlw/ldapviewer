@@ -100,46 +100,46 @@ python ldapviewer.py *.json
 ## All Filters
 
 #### UAC Filters
-- Account Enabled
-- Account Disabled
-- No Kerberos PreAuth (ASREProastable)
-- Unconstrained Delegation (KUD)
-- Constrained Delegation (KCD w/ protocol transition)
-- Cannot be delegated
+- ✅ Account Enabled
+- 🚫 Account Disabled
+- 🔑 No Kerberos PreAuth (ASREProastable)
+- 🎭🚀 Unconstrained Delegation (KUD)
+- 🎭📌 Constrained Delegation (KCD w/ protocol transition)
+- 🛡️ Cannot be delegated
 
 Password Related:
-- Password Not Required
-- Password Never Expires
-- User Cannot Change Password
-- Password Expired
+- 🔓 Password Not Required
+- ⏰ Password Never Expires
+- 🔒 User Cannot Change Password
+- ⚠️ Password Expired
 
 Authentication Related:
-- Smartcard Required
-- Account Locked Out
-- Reversible Encryption
-- Use DES Key Only
+- 💳 Smartcard Required
+- 🔐 Account Locked Out
+- 🔐 Reversible Encryption
+- 🔓 Use DES Key Only
 
 #### LDAP Filters
-- Has SPN (Kerberoastable - requires SPN and enabled account)
-- AdminCount=1
-- Constrained Delegation (KCD w/o protocol transition)
-- RBCD Delegation (Resource-Based Constrained Delegation)
-- gMSA Account (group Managed Service Account)
-- dMSA Account (Delegated Managed Service Account)
-- Has Description
-- Unsupported OS
-- PXE Boot Server (netbootServer)
-- SCCM Client (msSMSSiteCode)
-- SCCM Management Point
+- 🎯 Has SPN (Kerberoastable - requires SPN and enabled account)
+- 👑 AdminCount=1
+- 🎭📌 Constrained Delegation (KCD w/o protocol transition)
+- 🎭🧩 RBCD Delegation (Resource-Based Constrained Delegation)
+- 🔑 gMSA Account (group Managed Service Account)
+- 🧬 dMSA Account (Delegated Managed Service Account)
+- 📄 Has Description
+- 🖥️ Unsupported OS
+- 🖧 PXE Boot Server (netbootServer)
+- 📦 SCCM Client (msSMSSiteCode)
+- 🗄️ SCCM Management Point
 
 #### General Filters
-- Non-default objects only
-- Default objects only
-- Recently Created (last 30 days)
-- Inactive Accounts (last logon > 90 days)
-- Never Logged In (logon count = 0)
-- Owned Objects
-- Non-Owned Objects
+- 🛠️ Non-default objects only
+- 🏛️ Default objects only
+- 🕒 Recently Created (last 30 days)
+- 💤 Inactive Accounts (last logon > 90 days)
+- ❌ Never Logged In (logon count = 0)
+- 👑 Owned Objects
+- 🚫 Non-Owned Objects
 
 ## Roadmap
 
