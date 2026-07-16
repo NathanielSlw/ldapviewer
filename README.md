@@ -88,19 +88,16 @@ python ldapviewer.py *.json
   - **UAC filtering**: Filter users by UserAccountControl flags with one click.
   - **LDAP Attribute-based filtering**: Filter entries by LDAP attributes (e.g., has SPN, msDS-AllowedToDelegateTo, has Description, gMSA/dMSA, PXE boot server, SCCM client/management point)
   - **General filtering**: Default/non-default objects, recently created, inactive, never logged in
+- **Statistics page**: Security-focused dashboard with attack surface, account status, password policy findings, and group/UAC/OS distribution charts.
 - **CSV export**: Export the current table view to CSV.
 - **Object tagging**: Right-click on any object to mark it as owned or high value target.
-- **adwsdomaindump support**: Native detection and normalization of adwsdomaindump JSON exports alongside ldapdomaindump.
-- **gMSA / dMSA detection**:
-  - Flags group Managed Service Accounts and Delegated Managed Service Accounts with dedicated icons.
-  - Decodes `msDS-GroupMSAMembership` to show which principals can read a gMSA's password.
-  - Flags dMSA whose migration state (`msDS-DelegatedMSAState`) looks like a completed migration worth reviewing for the BadSuccessor attack.
+- **ldapdomaindump and adwsdomaindump support**
 
 #### Interface
 - **Modern responsive interface**: All HTML/CSS/JS is embedded and works offline.
 - **Dark mode**: Switch between light and dark themes with automatic system preference detection.
 
-## Filters
+## All Filters
 
 #### UAC Filters
 - Account Enabled
