@@ -843,6 +843,17 @@ input[type="text"]:focus + .search-icon {
     color: var(--danger);
 }
 
+.laps-chip {
+    margin-left: -4px;
+    font-size: 1em;
+    vertical-align: middle;
+}
+
+.laps-flagged-value {
+    font-weight: 600;
+    color: var(--danger);
+}
+
 
 /* =============================================================================
    Entry Header + Groups Chips

@@ -293,6 +293,34 @@ def is_dmsa(attributes):
     object_class = attributes.get("objectClass", [])
     return "msDS-DelegatedManagedServiceAccount" in object_class
 
+
+LAPS_CLEARTEXT_ATTRIBUTES = {'ms-Mcs-AdmPwd', 'msLAPS-Password'}
+LAPS_ENCRYPTED_ATTRIBUTES = {
+    'msLAPS-EncryptedPassword', 'msLAPS-EncryptedPasswordHistory',
+    'msLAPS-EncryptedDSRMPassword', 'msLAPS-EncryptedDSRMPasswordHistory'
+}
+LAPS_ATTRIBUTES = LAPS_CLEARTEXT_ATTRIBUTES | LAPS_ENCRYPTED_ATTRIBUTES
+
+def is_laps_readable(attributes):
+    """
+    Checks whether a LAPS password attribute is present and non-empty on this
+    entry. Since LAPS attributes are confidential (protected by a dedicated
+    ACE), their presence in the dump means the account used to run
+    ldapdomaindump/adwsdomaindump had read rights on the local admin password.
+
+    Returns:
+        tuple: (readable: bool, cleartext: bool, attribute_name: str or None)
+    """
+    for attr in LAPS_CLEARTEXT_ATTRIBUTES:
+        values = attributes.get(attr, [])
+        if values and any(str(v).strip() for v in values):
+            return True, True, attr
+    for attr in LAPS_ENCRYPTED_ATTRIBUTES:
+        values = attributes.get(attr, [])
+        if values and any(str(v).strip() for v in values):
+            return True, False, attr
+    return False, False, None
+
 # msDS-DelegatedMSAState values (dMSA migration state machine)
 DMSA_STATE_FLAGS = {
     0: {"name": "NOT_SET", "severity": "info",
@@ -383,13 +411,16 @@ def _parse_sid(data, offset):
     except (IndexError, struct.error):
         return None, 0
 
-def decode_group_msa_membership(values):
+def decode_group_msa_membership(values, sid_map=None):
     """
     Decode msDS-GroupMSAMembership into the list of principals allowed to
     read the gMSA's password (the ACCESS_ALLOWED entries of its DACL).
 
     Args:
         values (list): Raw attribute values as found in the LDAP JSON dump
+        sid_map (dict): Optional SID -> display name map (built from all
+            input files via build_global_sid_map) used to resolve principals
+            that aren't well-known SIDs
 
     Returns:
         str or None: HTML string, or None if the value couldn't be parsed
@@ -445,12 +476,45 @@ def decode_group_msa_membership(values):
     if not principals:
         return '<span class="gmsa-no-readers">⚠️ No principal can read this password</span>'
 
+    sid_map = sid_map or {}
     html = '<div class="gmsa-readers">'
     for sid_str in principals:
-        label = WELL_KNOWN_SIDS.get(sid_str, sid_str)
+        label = WELL_KNOWN_SIDS.get(sid_str) or sid_map.get(sid_str) or sid_str
         html += f'<span class="gmsa-reader-chip" title="{sid_str}">{label}</span>'
     html += '</div>'
     return html
+
+
+def build_global_sid_map(input_files):
+    """
+    Build a SID -> display name map by scanning objectSid across all provided
+    LDAP JSON files (users, computers, groups, ...), so gMSA password readers
+    (msDS-GroupMSAMembership) can be resolved to a readable name even when the
+    granted principal isn't a well-known SID.
+
+    Args:
+        input_files (list): Paths to all ldapdomaindump/adwsdomaindump JSON
+            files passed on the command line
+
+    Returns:
+        dict: Mapping of "S-1-5-..." SID strings to their display name
+    """
+    sid_map = {}
+    for input_file in input_files:
+        try:
+            with open(input_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+
+        data = normalize_ldap_data(data)
+        for entry in data:
+            attributes = entry.get("attributes", {})
+            dn = entry.get("dn", "")
+            object_sid = attributes.get("objectSid", [])
+            if object_sid:
+                sid_map[str(object_sid[0])] = extract_display_name(attributes, dn)
+    return sid_map
 
 
 # ============================================================================
@@ -653,6 +717,7 @@ def calculate_ldap_statistics(data):
             'pxeBootServers': 0,
             'sccmClients': 0,
             'sccmManagementPoints': 0,
+            'lapsReadable': 0,
         },
         'groups': {},
         'uacStats': {},
@@ -829,6 +894,11 @@ def calculate_ldap_statistics(data):
         if "mSSMSManagementPoint" in object_class:
             stats['ldap']['sccmManagementPoints'] += 1
 
+        # LAPS password readable check (dump account has read rights on it)
+        laps_readable, _, _ = is_laps_readable(attributes)
+        if laps_readable:
+            stats['ldap']['lapsReadable'] += 1
+
         # Has Description check
         description = attributes.get("description", [])
         if description and any(desc.strip() for desc in description):
@@ -946,10 +1016,12 @@ def render_statistics_html(stats, is_computers_file=False):
                     l['unsupportedOS'] if is_computers_file else 0,
                     l['pxeBootServers'] if is_computers_file else 0,
                     l['sccmClients'] if is_computers_file else 0,
-                    l['sccmManagementPoints'] if is_computers_file else 0, 1)
+                    l['sccmManagementPoints'] if is_computers_file else 0,
+                    l['lapsReadable'] if is_computers_file else 0, 1)
     other_rows = sec_row("Has Description", l['hasDescription'], "info", other_max)
     if is_computers_file:
         other_rows += sec_row("Unsupported OS",                      l['unsupportedOS'],          "critical", other_max)
+        other_rows += sec_row("LAPS Password Readable (dump account)", l['lapsReadable'],          "critical", other_max)
         other_rows += sec_row("gMSA (Group Managed Service Account)", l['gmsaAccounts'],           "warning",  other_max)
         other_rows += sec_row("DMSA Accounts (check for BadSuccessor)", l['dmsaAccounts'],         "warning",  other_max)
         other_rows += sec_row("PXE Boot Server (netbootServer)",     l['pxeBootServers'],         "warning",  other_max)
@@ -974,6 +1046,7 @@ def render_statistics_html(stats, is_computers_file=False):
     ]
     if is_computers_file:
         hero_items.append((l['unsupportedOS'], "Unsupported OS", "critical"))
+        hero_items.append((l['lapsReadable'], "LAPS Password Readable", "critical"))
         hero_items.append((l['gmsaAccounts'], "gMSA Accounts", "warning"))
         hero_items.append((l['dmsaAccounts'], "DMSA Accounts (check for BadSuccessor)", "warning"))
 
@@ -1091,13 +1164,14 @@ def format_groups_chips_html(group_names):
     chips_html += '</div>'
     return chips_html
    
-def render_entry(entry: dict, index: int) -> str:
+def render_entry(entry: dict, index: int, sid_map: dict = None) -> str:
     """
     Renders a single LDAP entry as HTML for the detail view
 
     Args:
         entry (dict): LDAP entry containing 'dn' and 'attributes' keys
         index (int): Unique index for generating HTML element IDs
+        sid_map (dict): Optional SID -> display name map (see build_global_sid_map)
 
     Returns:
         str: HTML string representing the entry with collapsible attributes
@@ -1141,10 +1215,23 @@ def render_entry(entry: dict, index: int) -> str:
     group_names = extract_group_names(memberof_values, attributes)
     groups_chips_html = format_groups_chips_html(group_names)
 
+    # LAPS icon HTML: presence of a LAPS password attribute means the dump
+    # account had read access to it
+    laps_chip_html = ''
+    laps_readable, laps_cleartext, laps_attribute = is_laps_readable(attributes)
+    if laps_readable:
+        laps_kind = "cleartext" if laps_cleartext else "encrypted (DPAPI-NG, needs further decryption)"
+        laps_chip_html = (
+            '<span class="laps-chip" '
+            f'title="LAPS password readable ({laps_attribute}, {laps_kind}): '
+            'the account used to run this dump has read rights on the local admin password.">'
+            '🔓</span>'
+        )
+
     # Create collapsible entry header with toggle functionality
     html = f'''<div class="entry">
 <div class="entry-header" onclick="toggle('attr{index}')">
-    <h2>{display_name} {spn_chip_html}{gmsa_chip_html}{dmsa_chip_html}{dmsa_review_chip_html}</h2>
+    <h2>{display_name} {spn_chip_html}{gmsa_chip_html}{dmsa_chip_html}{dmsa_review_chip_html}{laps_chip_html}</h2>
     {groups_chips_html}
 </div>
 <div class="attributes" id="attr{index}">'''
@@ -1156,7 +1243,7 @@ def render_entry(entry: dict, index: int) -> str:
         'dNSHostName', 'operatingSystem', 'operatingSystemVersion', 'operatingSystemServicePack',
         'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType',
         'msDS-DelegatedMSAState', 'msDS-ManagedAccountPrecededByLink'
-    }
+    } | LAPS_ATTRIBUTES
 
     # Build attributes table
     html += '<table class="attr-table">'
@@ -1177,7 +1264,7 @@ def render_entry(entry: dict, index: int) -> str:
 
         # Special handling for msDS-GroupMSAMembership (gMSA password readers)
         if key == "msDS-GroupMSAMembership" and values:
-            decoded = decode_group_msa_membership(values)
+            decoded = decode_group_msa_membership(values, sid_map)
             if decoded:
                 val = decoded
 
@@ -1194,6 +1281,11 @@ def render_entry(entry: dict, index: int) -> str:
         if key == "msDS-ManagedAccountPrecededByLink" and values and dmsa_migration_completed:
             val = f'<span class="dmsa-flagged-value" title="This dMSA is marked as migrated (state=2): the KDC will trust this link and embed the target account SID in the dMSA PAC.">⚠️ {val}</span>'
 
+        # Highlight LAPS password attributes: their presence means the dump account can read them
+        if key in LAPS_ATTRIBUTES and values and any(str(v).strip() for v in values):
+            title = "Cleartext local admin password" if key in LAPS_CLEARTEXT_ATTRIBUTES else "Encrypted local admin password (DPAPI-NG, needs further decryption)"
+            val = f'<span class="laps-flagged-value" title="{title} - readable by the dump account.">🔓 {val}</span>'
+
         html += f'<tr class="{row_class}"><td class="key">{key}</td><td class="value">{val}</td></tr>\n'
     html += "</table>\n</div>\n</div>\n"
     return html
@@ -1208,6 +1300,7 @@ def render_table(data: list, keys: list) -> str:
         'dNSHostName', 'operatingSystem', 'operatingSystemVersion', 'operatingSystemServicePack',
         'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType',
         'msDS-DelegatedMSAState', 'msDS-ManagedAccountPrecededByLink',
+        'ms-Mcs-AdmPwd', 'msLAPS-Password',
     ]
 
     # Keep only columns that actually exist in the data
@@ -1248,6 +1341,9 @@ def render_table(data: list, keys: list) -> str:
 
             elif k == "msDS-ManagedAccountPrecededByLink" and values and is_dmsa_migration_completed(attributes):
                 val = f'<span class="dmsa-flagged-value">⚠️ {", ".join(map(str, values))}</span>'
+
+            elif k in LAPS_CLEARTEXT_ATTRIBUTES and values and any(str(v).strip() for v in values):
+                val = f'<span class="laps-flagged-value">🔓 {", ".join(map(str, values))}</span>'
 
             elif k == "memberOf":
                 # Extract CN name from each DN, stripping the "CN=" prefix
@@ -1821,12 +1917,15 @@ def render_trusts_report(data, input_file):
         f.write(html)
     print(f"[+] Interactive HTML interface generated: {output_file}")
 
-def main(input_file):
+def main(input_file, sid_map=None):
     """
     Main function that processes a JSON LDAP dump and generates an HTML viewer
-    
+
     Args:
         input_file (str): Path to the input JSON file containing LDAP data
+        sid_map (dict): Optional SID -> display name map built across all
+            input files (see build_global_sid_map), used to resolve gMSA
+            password readers (msDS-GroupMSAMembership) to readable names
     """
     # Generate output filename based on input filename
     output_file = "ldapviewer_" + os.path.splitext(os.path.basename(input_file))[0] + ".html"
@@ -1884,7 +1983,7 @@ def main(input_file):
     # Generate HTML content for detail view
     detail_html = ""
     for idx, entry in enumerate(data):
-        detail_html += render_entry(entry, idx)
+        detail_html += render_entry(entry, idx, sid_map)
     
     # Generate HTML content for table view
     keys = gather_all_keys(data)
@@ -1958,6 +2057,11 @@ if __name__ == "__main__":
             print(f"[!] Error: Input file '{input_file}' must have a .json extension.")
             sys.exit(1)
 
+    # Build a SID -> name map across ALL input files so gMSA password readers
+    # (msDS-GroupMSAMembership) can be resolved to a name even when the
+    # principal isn't a well-known SID
+    sid_map = build_global_sid_map(input_files)
+
     # Process each file
     for input_file in input_files:
-        main(input_file)
+        main(input_file, sid_map)

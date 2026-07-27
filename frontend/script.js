@@ -290,6 +290,28 @@ function hasUnsupportedOS(osValue) {
     return regex.test(osValue);
 }
 
+// LAPS password attributes (legacy ms-Mcs-AdmPwd + Windows LAPS msLAPS-*).
+// Their presence in the dump means the dump account has read rights on them.
+const LAPS_CLEARTEXT_ATTRIBUTES = ['ms-Mcs-AdmPwd', 'msLAPS-Password'];
+const LAPS_ENCRYPTED_ATTRIBUTES = [
+    'msLAPS-EncryptedPassword', 'msLAPS-EncryptedPasswordHistory',
+    'msLAPS-EncryptedDSRMPassword', 'msLAPS-EncryptedDSRMPasswordHistory'
+];
+const LAPS_ATTRIBUTES = [...LAPS_CLEARTEXT_ATTRIBUTES, ...LAPS_ENCRYPTED_ATTRIBUTES];
+
+/**
+ * Returns true if any LAPS password attribute is present with a non-empty
+ * value on this detail-view entry (i.e. the dump account can read it)
+ */
+function hasLAPSReadable(entry) {
+    return LAPS_ATTRIBUTES.some(attrName => {
+        const cell = Array.from(entry.getElementsByClassName('key')).find(c => c.textContent === attrName);
+        if (!cell) return false;
+        const valueCell = cell.nextElementSibling;
+        return valueCell && valueCell.textContent.trim() !== '';
+    });
+}
+
 /**
  * Returns true if the entry is Kerberoastable:
  * - Has servicePrincipalName
@@ -482,12 +504,14 @@ function applyFiltersToDetailView() {
                             const osCell = Array.from(entry.getElementsByClassName('key')).find(cell => cell.textContent === 'operatingSystem');
                             const osValue = osCell ? osCell.nextElementSibling.textContent.trim() : "";
                             return hasUnsupportedOS(osValue);
+                        } else if (attrFilter.laps) {
+                            return hasLAPSReadable(entry);
                         } else {
                             return hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value, attrFilter.contains);
                         }
                     });
                 }
-                
+
                 entry.style.display = shouldShow ? "" : "none";
                 if (shouldShow) visibleCount++;
             });
@@ -543,6 +567,8 @@ function applyFiltersToDetailView() {
                         const osCell = Array.from(entry.getElementsByClassName('key')).find(cell => cell.textContent === 'operatingSystem');
                         const osValue = osCell ? osCell.nextElementSibling.textContent.trim() : "";
                         return hasUnsupportedOS(osValue);
+                    } else if (attrFilter.laps) {
+                        return hasLAPSReadable(entry);
                     } else {
                         return hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value, attrFilter.contains);
                     }
@@ -700,6 +726,14 @@ function applyFiltersToTableView() {
                         return hasSPN && !isDisabled;
                     }
                     return false;
+                } else if (attrFilter.laps) {
+                    // Only the cleartext LAPS attributes are exposed as table columns
+                    return LAPS_CLEARTEXT_ATTRIBUTES.some(attrName => {
+                        const idx = Array.from(ths).findIndex(th => th.textContent === attrName);
+                        if (idx === -1) return false;
+                        const cell = row.cells[idx];
+                        return cell && cell.textContent.trim() !== '';
+                    });
                 } else {
                     const attrIndex = Array.from(ths).findIndex(th => th.textContent === attrFilter.attribute);
                     if (attrIndex !== -1) {
@@ -890,7 +924,7 @@ function applyLDAPAttributeFilter() {
         }));
 
     // Preserve special filters managed by their own toggle functions
-    const specialFilters = filterStates.ldapAttributes.attributes.filter(a => a.unsupportedOS);
+    const specialFilters = filterStates.ldapAttributes.attributes.filter(a => a.unsupportedOS || a.laps);
     const merged = [...selectedAttributes, ...specialFilters];
 
     filterStates.ldapAttributes.enabled = merged.length > 0;
@@ -938,6 +972,31 @@ function toggleUnsupportedOSFilter(element) {
         element.classList.remove('active');
         // Remove the special filter
         filterStates.ldapAttributes.attributes = filterStates.ldapAttributes.attributes.filter(attr => !attr.unsupportedOS);
+        // Disable if no more LDAP filters
+        if (filterStates.ldapAttributes.attributes.length === 0) {
+            filterStates.ldapAttributes.enabled = false;
+        }
+    }
+    updateActiveFilterChips();
+    updateFilterCount();
+    applyAllFilters();
+}
+
+function toggleLAPSFilter(element) {
+    const isActive = element.classList.contains('active');
+    if (!isActive) {
+        element.classList.add('active');
+        filterStates.ldapAttributes.enabled = true;
+        // Add a special filter for LAPS password readability
+        filterStates.ldapAttributes.attributes.push({
+            attribute: 'laps',
+            value: null,
+            laps: true
+        });
+    } else {
+        element.classList.remove('active');
+        // Remove the special filter
+        filterStates.ldapAttributes.attributes = filterStates.ldapAttributes.attributes.filter(attr => !attr.laps);
         // Disable if no more LDAP filters
         if (filterStates.ldapAttributes.attributes.length === 0) {
             filterStates.ldapAttributes.enabled = false;
