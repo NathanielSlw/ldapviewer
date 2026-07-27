@@ -189,6 +189,9 @@
                                     <button class="filter-chip" data-attribute="objectClass" data-contains="msDS-DelegatedManagedServiceAccount" onclick="toggleFilterChip(this, 'ldap')">
                                         🧬 dMSA Account
                                     </button>
+                                    <button class="filter-chip" id="lapsReadableChip" onclick="toggleLAPSFilter(this)">
+                                        🔓 LAPS Password Readable
+                                    </button>
                                     <button class="filter-chip" data-attribute="netbootServer" onclick="toggleFilterChip(this, 'ldap')">
                                         🖧 PXE Boot Server (netbootServer)
                                     </button>
@@ -200,9 +203,6 @@
                                     </button>
                                     <button class="filter-chip" id="unsupportedOSChip" onclick="toggleUnsupportedOSFilter(this)">
                                         🖥️ Unsupported OS
-                                    </button>
-                                    <button class="filter-chip" id="lapsReadableChip" onclick="toggleLAPSFilter(this)">
-                                        🔓 LAPS Password Readable
                                     </button>
                                 </div>
                             </div>
