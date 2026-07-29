@@ -97,7 +97,7 @@
     "0x400000": {
         "name": "DONT_REQ_PREAUTH",
         "severity": "critical",
-        "description": "This account does not require Kerberos pre-authentication for logon"
+        "description": "This account does not require Kerberos pre-authentication for logon (ASREProast)"
     },
     "0x800000": {
         "name": "PASSWORD_EXPIRED",

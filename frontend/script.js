@@ -313,6 +313,22 @@ function hasLAPSReadable(entry) {
 }
 
 /**
+ * Returns true if the nTSecurityDescriptor row was rendered with at least
+ * one dangerous ACE (GenericAll/GenericWrite/WriteOwner/WriteDacl/
+ * ForceChangePassword/AllExtendedRights/Self/AddMember/AddKeyCredentialLink)
+ * granted to a non-default principal - Python marks those rows with the
+ * "acl-right-notable" class (default principals get "acl-right-default"
+ * instead so they still show up but don't count), see
+ * decode_dangerous_aces() in ldapviewer.py
+ */
+function hasDangerousACL(entry) {
+    const cell = Array.from(entry.getElementsByClassName('key')).find(c => c.textContent === 'nTSecurityDescriptor');
+    if (!cell) return false;
+    const valueCell = cell.nextElementSibling;
+    return valueCell && valueCell.querySelector('.acl-right-notable') !== null;
+}
+
+/**
  * Returns true if the entry is Kerberoastable:
  * - Has servicePrincipalName
  * - Is NOT disabled (ACCOUNTDISABLE flag absent)
@@ -506,6 +522,8 @@ function applyFiltersToDetailView() {
                             return hasUnsupportedOS(osValue);
                         } else if (attrFilter.laps) {
                             return hasLAPSReadable(entry);
+                        } else if (attrFilter.dangerousAcl) {
+                            return hasDangerousACL(entry);
                         } else {
                             return hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value, attrFilter.contains);
                         }
@@ -569,6 +587,8 @@ function applyFiltersToDetailView() {
                         return hasUnsupportedOS(osValue);
                     } else if (attrFilter.laps) {
                         return hasLAPSReadable(entry);
+                    } else if (attrFilter.dangerousAcl) {
+                        return hasDangerousACL(entry);
                     } else {
                         return hasLDAPAttribute(entry, attrFilter.attribute, attrFilter.value, attrFilter.contains);
                     }
@@ -924,7 +944,7 @@ function applyLDAPAttributeFilter() {
         }));
 
     // Preserve special filters managed by their own toggle functions
-    const specialFilters = filterStates.ldapAttributes.attributes.filter(a => a.unsupportedOS || a.laps);
+    const specialFilters = filterStates.ldapAttributes.attributes.filter(a => a.unsupportedOS || a.laps || a.dangerousAcl);
     const merged = [...selectedAttributes, ...specialFilters];
 
     filterStates.ldapAttributes.enabled = merged.length > 0;
@@ -997,6 +1017,31 @@ function toggleLAPSFilter(element) {
         element.classList.remove('active');
         // Remove the special filter
         filterStates.ldapAttributes.attributes = filterStates.ldapAttributes.attributes.filter(attr => !attr.laps);
+        // Disable if no more LDAP filters
+        if (filterStates.ldapAttributes.attributes.length === 0) {
+            filterStates.ldapAttributes.enabled = false;
+        }
+    }
+    updateActiveFilterChips();
+    updateFilterCount();
+    applyAllFilters();
+}
+
+function toggleDangerousACLFilter(element) {
+    const isActive = element.classList.contains('active');
+    if (!isActive) {
+        element.classList.add('active');
+        filterStates.ldapAttributes.enabled = true;
+        // Add a special filter for dangerous ACL grants (nTSecurityDescriptor)
+        filterStates.ldapAttributes.attributes.push({
+            attribute: 'dangerousAcl',
+            value: null,
+            dangerousAcl: true
+        });
+    } else {
+        element.classList.remove('active');
+        // Remove the special filter
+        filterStates.ldapAttributes.attributes = filterStates.ldapAttributes.attributes.filter(attr => !attr.dangerousAcl);
         // Disable if no more LDAP filters
         if (filterStates.ldapAttributes.attributes.length === 0) {
             filterStates.ldapAttributes.enabled = false;

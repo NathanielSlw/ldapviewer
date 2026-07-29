@@ -276,22 +276,23 @@ def is_kerberoastable(attributes):
     return True
 
 def is_gmsa(attributes):
-    """
-    Returns True if the entry is a gMSA (group Managed Service Account).
-
-    A gMSA's objectClass contains "msDS-GroupManagedServiceAccount"
-    """
+    """Returns True if the entry is a gMSA (group Managed Service Account)."""
     object_class = attributes.get("objectClass", [])
-    return "msDS-GroupManagedServiceAccount" in object_class
+    if "msDS-GroupManagedServiceAccount" in object_class:
+        return True
+    # adwsdomaindump sometimes only returns the most-derived objectClass
+    # value (e.g. "top"), dropping the inheritance chain - fall back to the
+    # gMSA-specific password-reader attribute, which is only ever set on gMSAs
+    return "msDS-GroupMSAMembership" in attributes
 
 def is_dmsa(attributes):
-    """
-    Returns True if the entry is a dMSA (Delegated Managed Service Account).
-
-    A dMSA's objectClass contains "msDS-DelegatedManagedServiceAccount"
-    """
+    """Returns True if the entry is a dMSA (Delegated Managed Service Account)."""
     object_class = attributes.get("objectClass", [])
-    return "msDS-DelegatedManagedServiceAccount" in object_class
+    if "msDS-DelegatedManagedServiceAccount" in object_class:
+        return True
+    # same objectClass truncation issue as is_gmsa() - fall back to the
+    # dMSA-specific migration-state attribute
+    return "msDS-DelegatedMSAState" in attributes
 
 
 LAPS_CLEARTEXT_ATTRIBUTES = {'ms-Mcs-AdmPwd', 'msLAPS-Password'}
@@ -302,15 +303,7 @@ LAPS_ENCRYPTED_ATTRIBUTES = {
 LAPS_ATTRIBUTES = LAPS_CLEARTEXT_ATTRIBUTES | LAPS_ENCRYPTED_ATTRIBUTES
 
 def is_laps_readable(attributes):
-    """
-    Checks whether a LAPS password attribute is present and non-empty on this
-    entry. Since LAPS attributes are confidential (protected by a dedicated
-    ACE), their presence in the dump means the account used to run
-    ldapdomaindump/adwsdomaindump had read rights on the local admin password.
-
-    Returns:
-        tuple: (readable: bool, cleartext: bool, attribute_name: str or None)
-    """
+    """Returns (readable, cleartext, attribute_name): whether the dump account could read a LAPS password."""
     for attr in LAPS_CLEARTEXT_ATTRIBUTES:
         values = attributes.get(attr, [])
         if values and any(str(v).strip() for v in values):
@@ -375,18 +368,63 @@ def is_dmsa_migration_completed(attributes):
 # whose DACL lists which principals are allowed to retrieve the gMSA's password.
 
 WELL_KNOWN_SIDS = {
+    # Universal SIDs (identical on every Windows machine/domain)
+    "S-1-0-0": "Null Authority",
     "S-1-1-0": "Everyone",
+    "S-1-2-0": "Local",
+    "S-1-3-0": "CREATOR OWNER",
+    "S-1-3-1": "CREATOR GROUP",
+    "S-1-3-2": "CREATOR OWNER SERVER",
+    "S-1-3-3": "CREATOR GROUP SERVER",
+    "S-1-3-4": "OWNER RIGHTS",
+    "S-1-5-1": "NT AUTHORITY\\DIALUP",
+    "S-1-5-2": "NT AUTHORITY\\NETWORK",
+    "S-1-5-3": "NT AUTHORITY\\BATCH",
+    "S-1-5-4": "NT AUTHORITY\\INTERACTIVE",
+    "S-1-5-6": "NT AUTHORITY\\SERVICE",
+    "S-1-5-7": "NT AUTHORITY\\ANONYMOUS LOGON",
+    "S-1-5-8": "NT AUTHORITY\\PROXY",
+    "S-1-5-9": "NT AUTHORITY\\ENTERPRISE DOMAIN CONTROLLERS",
+    "S-1-5-10": "NT AUTHORITY\\SELF",
+    "S-1-5-11": "NT AUTHORITY\\Authenticated Users",
+    "S-1-5-12": "NT AUTHORITY\\RESTRICTED CODE",
+    "S-1-5-13": "NT AUTHORITY\\TERMINAL SERVER USER",
+    "S-1-5-14": "NT AUTHORITY\\REMOTE INTERACTIVE LOGON",
+    "S-1-5-15": "NT AUTHORITY\\THIS ORGANIZATION",
+    "S-1-5-17": "NT AUTHORITY\\IUSR",
     "S-1-5-18": "NT AUTHORITY\\SYSTEM",
     "S-1-5-19": "NT AUTHORITY\\LOCAL SERVICE",
     "S-1-5-20": "NT AUTHORITY\\NETWORK SERVICE",
+    "S-1-5-33": "NT AUTHORITY\\WRITE RESTRICTED CODE",
+    # BUILTIN local groups (identical on every domain)
     "S-1-5-32-544": "BUILTIN\\Administrators",
     "S-1-5-32-545": "BUILTIN\\Users",
     "S-1-5-32-546": "BUILTIN\\Guests",
+    "S-1-5-32-547": "BUILTIN\\Power Users",
     "S-1-5-32-548": "BUILTIN\\Account Operators",
     "S-1-5-32-549": "BUILTIN\\Server Operators",
     "S-1-5-32-550": "BUILTIN\\Print Operators",
     "S-1-5-32-551": "BUILTIN\\Backup Operators",
+    "S-1-5-32-552": "BUILTIN\\Replicator",
     "S-1-5-32-554": "BUILTIN\\Pre-Windows 2000 Compatible Access",
+    "S-1-5-32-555": "BUILTIN\\Remote Desktop Users",
+    "S-1-5-32-556": "BUILTIN\\Network Configuration Operators",
+    "S-1-5-32-557": "BUILTIN\\Incoming Forest Trust Builders",
+    "S-1-5-32-558": "BUILTIN\\Performance Monitor Users",
+    "S-1-5-32-559": "BUILTIN\\Performance Log Users",
+    "S-1-5-32-560": "BUILTIN\\Windows Authorization Access Group",
+    "S-1-5-32-561": "BUILTIN\\Terminal Server License Servers",
+    "S-1-5-32-562": "BUILTIN\\Distributed COM Users",
+    "S-1-5-32-569": "BUILTIN\\Cryptographic Operators",
+    "S-1-5-32-573": "BUILTIN\\Event Log Readers",
+    "S-1-5-32-574": "BUILTIN\\Certificate Service DCOM Access",
+    "S-1-5-32-575": "BUILTIN\\RDS Remote Access Servers",
+    "S-1-5-32-576": "BUILTIN\\RDS Endpoint Servers",
+    "S-1-5-32-577": "BUILTIN\\RDS Management Servers",
+    "S-1-5-32-578": "BUILTIN\\Hyper-V Administrators",
+    "S-1-5-32-579": "BUILTIN\\Access Control Assistance Operators",
+    "S-1-5-32-580": "BUILTIN\\Remote Management Users",
+    "S-1-5-32-582": "BUILTIN\\Storage Replica Administrators",
 }
 
 def _parse_sid(data, offset):
@@ -411,78 +449,301 @@ def _parse_sid(data, offset):
     except (IndexError, struct.error):
         return None, 0
 
-def decode_group_msa_membership(values, sid_map=None):
-    """
-    Decode msDS-GroupMSAMembership into the list of principals allowed to
-    read the gMSA's password (the ACCESS_ALLOWED entries of its DACL).
-
-    Args:
-        values (list): Raw attribute values as found in the LDAP JSON dump
-        sid_map (dict): Optional SID -> display name map (built from all
-            input files via build_global_sid_map) used to resolve principals
-            that aren't well-known SIDs
-
-    Returns:
-        str or None: HTML string, or None if the value couldn't be parsed
-    """
-    if not values:
+def _parse_guid(data, offset):
+    """Parse a binary GUID (MS-DTYP 2.3.4) at `offset` into its string form."""
+    try:
+        d1, d2, d3 = struct.unpack_from("<LHH", data, offset)
+        d4 = data[offset + 8:offset + 16]
+        return f"{d1:08x}-{d2:04x}-{d3:04x}-{d4[0]:02x}{d4[1]:02x}-{''.join(f'{b:02x}' for b in d4[2:])}"
+    except (struct.error, IndexError):
         return None
 
+def _decode_security_descriptor_blob(values):
+    """Base64-decode a security-descriptor-style attribute's first value."""
+    if not values:
+        return None
     raw = values[0]
     if not (isinstance(raw, dict) and raw.get('encoding') == 'base64'):
         return None
-
     try:
-        data = base64.b64decode(raw.get('encoded', ''))
+        return base64.b64decode(raw.get('encoded', ''))
     except Exception:
         return None
 
-    # Self-relative security descriptor header (MS-DTYP 2.4.6): revision, sbz1,
-    # control flags, then 4 offsets (owner, group, sacl, dacl)
+def _iterate_dacl_aces(data):
+    """Parse a self-relative SECURITY_DESCRIPTOR's DACL (MS-DTYP 2.4.6), yielding each ACE as {type, inherited, mask, object_type, sid}."""
     if len(data) < 20:
-        return None
+        return
     try:
         control, = struct.unpack_from("<H", data, 2)
         off_dacl, = struct.unpack_from("<L", data, 16)
     except struct.error:
-        return None
+        return
 
-    # SE_DACL_PRESENT (0x0004): no DACL means nobody is explicitly granted read access
+    # SE_DACL_PRESENT (0x0004): no DACL means no ACE grants anything
     if not (control & 0x0004) or off_dacl == 0 or off_dacl + 8 > len(data):
-        return None
+        return
 
     try:
         ace_count, = struct.unpack_from("<H", data, off_dacl + 4)
     except struct.error:
-        return None
+        return
 
-    principals = []
     pos = off_dacl + 8
     for _ in range(ace_count):
         if pos + 8 > len(data):
             break
         ace_type = data[pos]
+        ace_flags = data[pos + 1]
         ace_size, = struct.unpack_from("<H", data, pos + 2)
         if ace_size <= 0 or pos + ace_size > len(data):
             break
 
-        if ace_type == 0:  # ACCESS_ALLOWED_ACE_TYPE
-            sid_str, _ = _parse_sid(data, pos + 8)
-            if sid_str:
-                principals.append(sid_str)
+        try:
+            mask, = struct.unpack_from("<L", data, pos + 4)
+        except struct.error:
+            break
 
+        object_type = None
+        sid_offset = pos + 8
+        if ace_type in (5, 6):  # ACCESS_ALLOWED/DENIED_OBJECT_ACE_TYPE
+            if pos + 12 > len(data):
+                pos += ace_size
+                continue
+            obj_flags, = struct.unpack_from("<L", data, pos + 8)
+            sid_offset = pos + 12
+            if obj_flags & 0x1:  # ACE_OBJECT_TYPE_PRESENT
+                object_type = _parse_guid(data, sid_offset)
+                sid_offset += 16
+            if obj_flags & 0x2:  # ACE_INHERITED_OBJECT_TYPE_PRESENT
+                sid_offset += 16
+
+        sid_str, _ = _parse_sid(data, sid_offset)
+        if sid_str:
+            yield {
+                'type': ace_type,
+                'inherited': bool(ace_flags & 0x10),  # INHERITED_ACE
+                'mask': mask,
+                'object_type': object_type,
+                'sid': sid_str,
+            }
         pos += ace_size
 
+def _parse_sd_owner(data):
+    """Parse the Owner SID from a self-relative SECURITY_DESCRIPTOR (MS-DTYP 2.4.6)."""
+    if len(data) < 20:
+        return None
+    try:
+        off_owner, = struct.unpack_from("<L", data, 4)
+    except struct.error:
+        return None
+    if off_owner == 0 or off_owner >= len(data):
+        return None
+    sid_str, _ = _parse_sid(data, off_owner)
+    return sid_str
+
+def _render_principal_chips(principals, sid_map, empty_message):
+    """Render a flat list of principal SIDs as chips (gMSA readers, RBCD principals)."""
     if not principals:
-        return '<span class="gmsa-no-readers">⚠️ No principal can read this password</span>'
+        return f'<span class="gmsa-no-readers">⚠️ {empty_message}</span>'
 
     sid_map = sid_map or {}
     html = '<div class="gmsa-readers">'
     for sid_str in principals:
-        label = WELL_KNOWN_SIDS.get(sid_str) or sid_map.get(sid_str) or sid_str
+        label = WELL_KNOWN_SIDS.get(sid_str) or sid_map.get(sid_str)
+        if label is None and _looks_like_deleted_object(sid_str):
+            label = f'{sid_str} (unresolved - object likely deleted)'
+        label = label or sid_str
         html += f'<span class="gmsa-reader-chip" title="{sid_str}">{label}</span>'
     html += '</div>'
     return html
+
+def _collect_gmsa_reader_sids(values):
+    """Raw SIDs allowed to retrieve a gMSA's password, from msDS-GroupMSAMembership's own DACL."""
+    data = _decode_security_descriptor_blob(values)
+    if data is None:
+        return []
+    return [ace['sid'] for ace in _iterate_dacl_aces(data) if ace['type'] == 0]
+
+def decode_group_msa_membership(values, sid_map=None):
+    """Decode msDS-GroupMSAMembership into the principals allowed to read the gMSA's password."""
+    if _decode_security_descriptor_blob(values) is None:
+        return None
+    return _render_principal_chips(_collect_gmsa_reader_sids(values), sid_map, "No principal can read this password")
+
+def decode_rbcd_principals(values, sid_map=None):
+    """Decode msDS-AllowedToActOnBehalfOfOtherIdentity into the principals allowed to RBCD as this computer."""
+    data = _decode_security_descriptor_blob(values)
+    if data is None:
+        return None
+    principals = [ace['sid'] for ace in _iterate_dacl_aces(data) if ace['type'] == 0]
+    return _render_principal_chips(principals, sid_map, "No principal configured for RBCD")
+
+# Extended-right GUIDs (MS-ADTS 5.1.3). The two DS-Replication-Get-Changes*
+# entries get merged into "DCSync" by decode_dangerous_aces() when both hold.
+INTERESTING_RIGHT_GUIDS = {
+    '00299570-246d-11d0-a768-00aa006e0529': 'ForceChangePassword',
+    '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2': 'DS-Replication-Get-Changes',
+    '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2': 'DS-Replication-Get-Changes-All',
+}
+
+# schemaIDGUID of properties whose WriteProperty ACE deserves its own name
+# instead of being lumped under GenericWrite
+INTERESTING_PROPERTY_GUIDS = {
+    'bf9679c0-0de6-11d0-a285-00aa003049e2': 'AddMember',            # member
+    '5b47d60f-6090-40b2-9f37-2a4de88f3063': 'AddKeyCredentialLink', # msDS-KeyCredentialLink (Shadow Credentials)
+    'f3a64788-5306-11d1-a9c5-0000f80367c1': 'WriteSPN',             # servicePrincipalName
+    '3f78c3e5-f79a-46bd-a0b8-9d18116ddc79': 'AllowedToAct',         # msDS-AllowedToActOnBehalfOfOtherIdentity (can configure RBCD)
+}
+
+# schemaIDGUID of confidential properties readable via ADS_RIGHT_DS_READ_PROP,
+# on top of is_laps_readable() (which only proves the dump account's access)
+INTERESTING_READ_PROPERTY_GUIDS = {
+    '657e154a-f8d8-44aa-9de5-bc5ddc1e7620': 'ReadLAPSPassword',  # ms-Mcs-AdmPwd (legacy LAPS)
+}
+
+DCSYNC_COMPONENT_RIGHTS = {'DS-Replication-Get-Changes', 'DS-Replication-Get-Changes-All'}
+
+# (badge CSS class, tooltip) per detected right, two severity tiers
+ACL_RIGHT_INFO = {
+    'GenericAll': ('acl-badge-critical', "Full control: can reset the password, add an SPN, modify any attribute, take ownership or rewrite the DACL."),
+    'WriteOwner': ('acl-badge-critical', "Can take ownership of the object, then grant itself further rights via WriteDacl."),
+    'WriteDacl': ('acl-badge-critical', "Can rewrite the object's DACL to grant itself (or anyone) further rights, e.g. GenericAll."),
+    'Owns': ('acl-badge-critical', "Owner of this object: owners implicitly get READ_CONTROL/WRITE_DAC and can grant themselves further rights (e.g. WriteDacl), even with no explicit ACE."),
+    'ForceChangePassword': ('acl-badge-critical', "Can reset this account's password without knowing the current one (User-Force-Change-Password extended right)."),
+    'AddMember': ('acl-badge-critical', "Can directly write the member attribute: add itself (or anyone) to this group."),
+    'AddKeyCredentialLink': ('acl-badge-critical', "Can write msDS-KeyCredentialLink: Shadow Credentials attack, add a certificate to authenticate as this principal without knowing its password."),
+    'AllowedToAct': ('acl-badge-critical', "Can write msDS-AllowedToActOnBehalfOfOtherIdentity: can configure Resource-Based Constrained Delegation on this computer and impersonate any user against it."),
+    'DCSync': ('acl-badge-critical', "Granted DS-Replication-Get-Changes + DS-Replication-Get-Changes-All: can perform a DCSync attack and dump every domain credential, including krbtgt."),
+    'AllExtendedRights': ('acl-badge-critical', "Granted every extended right on this object (e.g. ForceChangePassword, or DCSync rights if granted on the domain object)."),
+    'GenericWrite': ('acl-badge-warning', "Can write any non-protected attribute, e.g. set a logon script or SPN."),
+    'AddSelf': ('acl-badge-warning', "Validated write (Self): can add/remove itself as a member of this group."),
+    'WriteSPN': ('acl-badge-warning', "Can write servicePrincipalName: add an SPN to make this account Kerberoastable, or hijack an existing one."),
+    'ReadLAPSPassword': ('acl-badge-critical', "Can read the legacy LAPS local admin password (ms-Mcs-AdmPwd) directly, regardless of what the dump account itself could read."),
+    'DS-Replication-Get-Changes': ('acl-badge-warning', "Granted DS-Replication-Get-Changes alone: combined with DS-Replication-Get-Changes-All on the same principal, this enables a DCSync attack."),
+    'DS-Replication-Get-Changes-All': ('acl-badge-warning', "Granted DS-Replication-Get-Changes-All alone: combined with DS-Replication-Get-Changes on the same principal, this enables a DCSync attack."),
+    'CreateChild': ('acl-badge-warning', "Can create child objects under this container (e.g. computers, GPOs, users - or a dMSA on an OU, relevant to the BadSuccessor attack)."),
+    'ReadGMSAPassword': ('acl-badge-critical', "Allowed to retrieve this gMSA's current password (PrincipalsAllowedToRetrieveManagedPassword) - full impersonation of the service account."),
+}
+
+def classify_ace_rights(mask, object_type):
+    """Map an ACE's mask (+ ObjectType GUID) to the ACL_RIGHT_INFO keys it grants."""
+    FULL_CONTROL_MASK = 0x000F01FF
+    if (mask & 0x10000000) or ((mask & FULL_CONTROL_MASK) == FULL_CONTROL_MASK):  # GENERIC_ALL
+        return ['GenericAll']
+
+    rights = []
+    if mask & 0x20:  # ADS_RIGHT_DS_WRITE_PROP
+        if object_type is None:
+            rights.append('GenericWrite')  # write access to every property
+        elif object_type in INTERESTING_PROPERTY_GUIDS:
+            rights.append(INTERESTING_PROPERTY_GUIDS[object_type])
+    if mask & 0x40000000:  # GENERIC_WRITE
+        if 'GenericWrite' not in rights:
+            rights.append('GenericWrite')
+    if mask & 0x10:  # ADS_RIGHT_DS_READ_PROP
+        if object_type in INTERESTING_READ_PROPERTY_GUIDS:
+            rights.append(INTERESTING_READ_PROPERTY_GUIDS[object_type])
+    if mask & 0x80000:  # WRITE_OWNER
+        rights.append('WriteOwner')
+    if mask & 0x40000:  # WRITE_DAC
+        rights.append('WriteDacl')
+    if mask & 0x1:  # ADS_RIGHT_DS_CREATE_CHILD
+        rights.append('CreateChild')
+    if mask & 0x100:  # ADS_RIGHT_DS_CONTROL_ACCESS (extended right)
+        if object_type is None:
+            rights.append('AllExtendedRights')
+        elif object_type in INTERESTING_RIGHT_GUIDS:
+            rights.append(INTERESTING_RIGHT_GUIDS[object_type])
+    if mask & 0x8:  # ADS_RIGHT_DS_SELF (validated write)
+        rights.append('AddSelf')
+    return rights
+
+# principals whose grants are expected by AD design, not a misconfiguration
+DEFAULT_ACL_PRINCIPAL_SIDS = {
+    'S-1-5-18',      # NT AUTHORITY\SYSTEM
+    'S-1-5-10',      # NT AUTHORITY\SELF
+    'S-1-3-0',       # CREATOR OWNER
+    'S-1-5-32-544',  # BUILTIN\Administrators
+    'S-1-5-32-548',  # BUILTIN\Account Operators (GenericAll on non-protected objects, inherited from domain root)
+    'S-1-5-32-550',  # BUILTIN\Print Operators (default CreateChild rights on Domain Controllers)
+}
+DEFAULT_ACL_PRINCIPAL_RIDS = {512, 519, 500, 526, 527}  # Domain Admins, Enterprise Admins, Administrator, Key Admins, Enterprise Key Admins
+
+def _is_default_acl_principal(sid_str):
+    """Returns True for principals excluded from dangerous-ACE reporting (see DEFAULT_ACL_PRINCIPAL_SIDS)."""
+    if sid_str in DEFAULT_ACL_PRINCIPAL_SIDS:
+        return True
+    return getRIDFromObjectSID(sid_str) in DEFAULT_ACL_PRINCIPAL_RIDS
+
+def _looks_like_deleted_object(sid_str):
+    """A domain-style SID (non-default RID) that didn't resolve to any object in the dump is likely stale/deleted."""
+    if not sid_str.startswith('S-1-5-21-'):
+        return False
+    rid = getRIDFromObjectSID(sid_str)
+    return rid is not None and rid >= 1000
+
+def _collect_dangerous_aces(values):
+    """Returns {sid: set(rights)} from an nTSecurityDescriptor's DACL + owner, or None if unparseable."""
+    data = _decode_security_descriptor_blob(values)
+    if data is None:
+        return None
+
+    per_principal = {}
+
+    owner_sid = _parse_sd_owner(data)
+    if owner_sid:
+        per_principal.setdefault(owner_sid, set()).add('Owns')
+
+    for ace in _iterate_dacl_aces(data):
+        if ace['type'] not in (0, 5):  # only ALLOWED ACEs grant rights
+            continue
+        rights = classify_ace_rights(ace['mask'], ace['object_type'])
+        if rights:
+            per_principal.setdefault(ace['sid'], set()).update(rights)
+
+    # DS-Replication-Get-Changes(-All) only enable DCSync together
+    for rights in per_principal.values():
+        if DCSYNC_COMPONENT_RIGHTS <= rights:
+            rights -= DCSYNC_COMPONENT_RIGHTS
+            rights.add('DCSync')
+
+    return per_principal
+
+def _render_acl_rights(per_principal, sid_map=None):
+    """Render a {sid: set(rights)} dict (see _collect_dangerous_aces) as ⚔️ ACL rows."""
+    if not per_principal:
+        return '<span class="acl-no-findings">No dangerous right (GenericAll, WriteOwner, WriteDacl, Owns, ForceChangePassword, AllExtendedRights, AddSelf, AddMember, AddKeyCredentialLink, WriteSPN, AllowedToAct, ReadLAPSPassword, ReadGMSAPassword, DCSync, GenericWrite, CreateChild) found in the DACL</span>'
+
+    sid_map = sid_map or {}
+    html = '<div class="acl-rights">'
+    for sid_str, rights in per_principal.items():
+        label = WELL_KNOWN_SIDS.get(sid_str) or sid_map.get(sid_str)
+        stale = label is None and _looks_like_deleted_object(sid_str)
+        label = label or sid_str
+        if stale:
+            label += ' (unresolved - object likely deleted)'
+        row_class = 'acl-right-row acl-right-default' if (_is_default_acl_principal(sid_str) or stale) else 'acl-right-row acl-right-notable'
+        badges = ''.join(
+            f'<span class="acl-badge {ACL_RIGHT_INFO[r][0]}" title="{ACL_RIGHT_INFO[r][1]}">{r}</span>'
+            for r in sorted(rights)
+        )
+        html += f'<div class="{row_class}"><span class="acl-principal" title="{sid_str}">{label}</span>{badges}</div>'
+    html += '</div>'
+    return html
+
+def decode_dangerous_aces(values, sid_map=None):
+    """
+    Decode an nTSecurityDescriptor's DACL (+ owner) into every principal
+    granted a right in ACL_RIGHT_INFO - the edges BloodHound builds attack
+    paths from. Default principals (DEFAULT_ACL_PRINCIPAL_SIDS) are still
+    shown but dimmed ("acl-right-default" vs "acl-right-notable"), which is
+    what actually drives the ⚔️ chip / stats counter / ACL filter.
+    """
+    per_principal = _collect_dangerous_aces(values)
+    if per_principal is None:
+        return None
+    return _render_acl_rights(per_principal, sid_map)
 
 
 def build_global_sid_map(input_files):
@@ -711,6 +972,7 @@ def calculate_ldap_statistics(data):
             'resourceBasedConstrainedDelegation': 0,
             'gmsaAccounts': 0,
             'dmsaAccounts': 0,
+            'dangerousAclObjects': 0,
             # Information Disclosure
             'hasDescription': 0,
             'unsupportedOS': 0,
@@ -879,6 +1141,14 @@ def calculate_ldap_statistics(data):
         if is_dmsa(attributes):
             stats['ldap']['dmsaAccounts'] += 1
 
+        # Dangerous ACL check: any right in ACL_RIGHT_INFO granted to a non-default principal
+        acl_rights = _collect_dangerous_aces(attributes.get("nTSecurityDescriptor", [])) or {}
+        if is_gmsa(attributes):
+            for reader_sid in _collect_gmsa_reader_sids(attributes.get("msDS-GroupMSAMembership", [])):
+                acl_rights.setdefault(reader_sid, set()).add('ReadGMSAPassword')
+        if any(not _is_default_acl_principal(sid) for sid in acl_rights):
+            stats['ldap']['dangerousAclObjects'] += 1
+
         # PXE Boot Server check
         netboot_server = attributes.get("netbootServer", [])
         if netboot_server and any(v.strip() for v in netboot_server):
@@ -1012,6 +1282,7 @@ def render_statistics_html(stats, is_computers_file=False):
 
     # Other / info
     other_max = max(l['hasDescription'], u['smartcardRequired'], u['notDelegated'], l['gmsaAccounts'],
+                    l['dangerousAclObjects'],
                     l['dmsaAccounts'] if is_computers_file else 0,
                     l['unsupportedOS'] if is_computers_file else 0,
                     l['pxeBootServers'] if is_computers_file else 0,
@@ -1019,6 +1290,7 @@ def render_statistics_html(stats, is_computers_file=False):
                     l['sccmManagementPoints'] if is_computers_file else 0,
                     l['lapsReadable'] if is_computers_file else 0, 1)
     other_rows = sec_row("Has Description", l['hasDescription'], "info", other_max)
+    other_rows += sec_row("Objects with a Dangerous ACL Grant (non-default principal)", l['dangerousAclObjects'], "warning", other_max)
     if is_computers_file:
         other_rows += sec_row("Unsupported OS",                      l['unsupportedOS'],          "critical", other_max)
         other_rows += sec_row("LAPS Password Readable (dump account)", l['lapsReadable'],          "critical", other_max)
@@ -1189,10 +1461,14 @@ def render_entry(entry: dict, index: int, sid_map: dict = None) -> str:
     if kerberoastable:
         spn_chip_html = '<span class="spn-chip" title="Kerberoastable: Has SPN">🎯</span>'
 
-    # gMSA icon HTML (can be styled via CSS)
+    # decoded once, reused below for the 🔑 chip and the attribute row
+    gmsa_readers_html = decode_group_msa_membership(attributes.get("msDS-GroupMSAMembership", []), sid_map)
+    gmsa_has_readers = bool(gmsa_readers_html) and 'gmsa-reader-chip' in gmsa_readers_html
+
+    # only shown when the password is actually exposed to someone
     gmsa_chip_html = ''
-    if is_gmsa(attributes):
-        gmsa_chip_html = '<span class="gmsa-chip" title="gMSA: Group Managed Service Account">🔑</span>'
+    if is_gmsa(attributes) and gmsa_has_readers:
+        gmsa_chip_html = '<span class="gmsa-chip" title="gMSA: Group Managed Service Account - its password is readable by at least one principal (see msDS-GroupMSAMembership below)">🔑</span>'
 
     # dMSA icon HTML + BadSuccessor risk icon (can be styled via CSS)
     dmsa_chip_html = ''
@@ -1215,23 +1491,43 @@ def render_entry(entry: dict, index: int, sid_map: dict = None) -> str:
     group_names = extract_group_names(memberof_values, attributes)
     groups_chips_html = format_groups_chips_html(group_names)
 
-    # LAPS icon HTML: presence of a LAPS password attribute means the dump
-    # account had read access to it
+    # decoded once, reused below for the LAPS/⚔️ chips and the attribute row.
+    # gMSA password readers (a separate attribute/DACL) are merged in as
+    # ReadGMSAPassword so they show up in the same unified ACL rights list.
+    acl_rights = _collect_dangerous_aces(attributes.get("nTSecurityDescriptor", [])) or {}
+    if is_gmsa(attributes):
+        for reader_sid in _collect_gmsa_reader_sids(attributes.get("msDS-GroupMSAMembership", [])):
+            acl_rights.setdefault(reader_sid, set()).add('ReadGMSAPassword')
+    dangerous_acl_html = _render_acl_rights(acl_rights, sid_map) if (attributes.get("nTSecurityDescriptor") or acl_rights) else None
+    has_dangerous_acl = bool(dangerous_acl_html) and 'acl-right-notable' in dangerous_acl_html
+
+    # dump account could read it directly, or ACL grants ReadLAPSPassword
     laps_chip_html = ''
     laps_readable, laps_cleartext, laps_attribute = is_laps_readable(attributes)
-    if laps_readable:
-        laps_kind = "cleartext" if laps_cleartext else "encrypted (DPAPI-NG, needs further decryption)"
-        laps_chip_html = (
-            '<span class="laps-chip" '
-            f'title="LAPS password readable ({laps_attribute}, {laps_kind}): '
-            'the account used to run this dump has read rights on the local admin password.">'
-            '🔓</span>'
+    laps_readable_via_acl = bool(dangerous_acl_html) and 'ReadLAPSPassword' in dangerous_acl_html
+    if laps_readable or laps_readable_via_acl:
+        if laps_readable:
+            laps_kind = "cleartext" if laps_cleartext else "encrypted (DPAPI-NG, needs further decryption)"
+            laps_reason = f"the account used to run this dump has read rights on the local admin password ({laps_attribute}, {laps_kind})"
+        else:
+            laps_reason = "its DACL grants ReadLAPSPassword to at least one principal (see nTSecurityDescriptor below)"
+        laps_chip_html = f'<span class="laps-chip" title="LAPS password readable: {laps_reason}.">🔓</span>'
+
+    dangerous_acl_chip_html = ''
+    if has_dangerous_acl:
+        dangerous_acl_chip_html = (
+            '<span class="acl-chip" '
+            "title=\"This object's DACL grants a dangerous right (GenericAll, WriteOwner, "
+            'WriteDacl, Owns, ForceChangePassword, AllExtendedRights, GenericWrite, AddSelf, '
+            'AddMember, AddKeyCredentialLink, WriteSPN, AllowedToAct, ReadLAPSPassword, ReadGMSAPassword, '
+            'DCSync, CreateChild) to a non-default principal - review who they are.">'
+            '⚔️</span>'
         )
 
     # Create collapsible entry header with toggle functionality
     html = f'''<div class="entry">
 <div class="entry-header" onclick="toggle('attr{index}')">
-    <h2>{display_name} {spn_chip_html}{gmsa_chip_html}{dmsa_chip_html}{dmsa_review_chip_html}{laps_chip_html}</h2>
+    <h2>{display_name} {spn_chip_html}{gmsa_chip_html}{dmsa_chip_html}{dmsa_review_chip_html}{laps_chip_html}{dangerous_acl_chip_html}</h2>
     {groups_chips_html}
 </div>
 <div class="attributes" id="attr{index}">'''
@@ -1242,7 +1538,7 @@ def render_entry(entry: dict, index: int, sid_map: dict = None) -> str:
         'userAccountControl', 'pwdLastSet', 'objectSid', 'memberOf','description', 'servicePrincipalName',
         'dNSHostName', 'operatingSystem', 'operatingSystemVersion', 'operatingSystemServicePack',
         'securityIdentifier', 'trustAttributes', 'trustDirection', 'trustType',
-        'msDS-DelegatedMSAState', 'msDS-ManagedAccountPrecededByLink'
+        'msDS-DelegatedMSAState', 'msDS-ManagedAccountPrecededByLink', 'nTSecurityDescriptor'
     } | LAPS_ATTRIBUTES
 
     # Build attributes table
@@ -1263,10 +1559,18 @@ def render_entry(entry: dict, index: int, sid_map: dict = None) -> str:
                 pass
 
         # Special handling for msDS-GroupMSAMembership (gMSA password readers)
-        if key == "msDS-GroupMSAMembership" and values:
-            decoded = decode_group_msa_membership(values, sid_map)
+        if key == "msDS-GroupMSAMembership" and gmsa_readers_html:
+            val = gmsa_readers_html
+
+        # Special handling for msDS-AllowedToActOnBehalfOfOtherIdentity (RBCD principals)
+        if key == "msDS-AllowedToActOnBehalfOfOtherIdentity" and values:
+            decoded = decode_rbcd_principals(values, sid_map)
             if decoded:
                 val = decoded
+
+        # Special handling for nTSecurityDescriptor (dangerous ACL rights)
+        if key == "nTSecurityDescriptor" and dangerous_acl_html:
+            val = dangerous_acl_html
 
         # Special handling for msDS-DelegatedMSAState (dMSA migration state)
         if key == "msDS-DelegatedMSAState" and values:
@@ -2035,7 +2339,7 @@ logo_ascii = r"""
 
 if __name__ == "__main__":
     print(logo_ascii)
-    print("LDAPViewer v4.0 - by NathanielSlw\n")
+    print("LDAPViewer v5.0 - by NathanielSlw\n")
     
     parser = argparse.ArgumentParser(
         description='Generates an interactive HTML interface to explore ldapdomaindump JSON files.',

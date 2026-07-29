@@ -854,6 +854,77 @@ input[type="text"]:focus + .search-icon {
     color: var(--danger);
 }
 
+.acl-chip {
+    margin-left: -4px;
+    font-size: 1em;
+    vertical-align: middle;
+}
+
+.acl-no-findings {
+    color: var(--text-muted);
+}
+
+.acl-rights {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.acl-right-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.acl-right-default {
+    opacity: 0.55;
+}
+
+.acl-right-default:hover {
+    opacity: 1;
+}
+
+.acl-principal {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.acl-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    font-size: 0.85em;
+    font-weight: 600;
+    white-space: nowrap;
+    border: 1px solid;
+    cursor: help;
+}
+
+.acl-badge-critical {
+    background-color: #ddd6fe;
+    color: #4c1d95;
+    border-color: #8b5cf6;
+}
+
+[data-theme="dark"] .acl-badge-critical {
+    background-color: #4c1d95;
+    color: #ddd6fe;
+    border-color: #8b5cf6;
+}
+
+.acl-badge-warning {
+    background-color: #a5f3fc;
+    color: #164e63;
+    border-color: #06b6d4;
+}
+
+[data-theme="dark"] .acl-badge-warning {
+    background-color: #164e63;
+    color: #a5f3fc;
+    border-color: #06b6d4;
+}
+
 
 /* =============================================================================
    Entry Header + Groups Chips
